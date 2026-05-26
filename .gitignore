@@ -8,6 +8,7 @@
 
 # Markdown documents
 *.md
+!/README.md
 
 # Generated output
 output/
