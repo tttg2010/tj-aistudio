@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -667,10 +668,12 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 	if err != nil {
 		return nil, err
 	}
-	bloggerImageName, err := UploadToComfyUIInput(bloggerRefAbs)
+	imageProvider := getConfiguredImageGenerationProvider()
+	bloggerImageName, err := uploadReferenceImageForProvider(imageProvider, bloggerRefAbs)
 	if err != nil {
 		return nil, err
 	}
+	rhGenerated := 0
 
 	for idx, spot := range spots {
 		spotType := normalizeStoreVisitSpotType(spot.SpotType, spot.Name)
@@ -692,7 +695,7 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
 			continue
 		}
-		spotImageName, err := UploadToComfyUIInput(spotRefAbs)
+		spotImageName, err := uploadReferenceImageForProvider(imageProvider, spotRefAbs)
 		if err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
 			continue
@@ -704,12 +707,9 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
 			continue
 		}
-		logComfyWorkflowPayload("Store Visit Image ComfyUI Payload", workflowDisplayNameFromPath(storeVisitImageWorkflowPath), workflowJSON)
-		promptID, err := QueueComfyPrompt(workflowJSON)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
-			continue
-		}
+		logComfyWorkflowPayload("Store Visit Image Payload", workflowDisplayNameFromPath(storeVisitImageWorkflowPath), workflowJSON)
+
+		// Mark the spot as generating before submission so the UI reflects progress.
 		if err := db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
 			"image_status":             "generating",
 			"image_current_task_id":    taskID,
@@ -727,6 +727,53 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 			continue
 		}
 		BroadcastUpdate("store_visit_spot", spot.ID)
+
+		if imageProvider == ImageGenerationProviderRunningHub {
+			// RunningHub runs synchronously (free tier is single-concurrency anyway):
+			// generate, download and persist this spot before moving to the next.
+			saveDir := storeVisitImagesDir(project.Code)
+			fileBase := fmt.Sprintf("%s_%d", getStoreVisitSpotFileKey(spot), spot.ID)
+			webPath, rhErr := runRunningHubImageTask(filepath.Base(storeVisitImageWorkflowPath), template, workflowJSON, saveDir, fileBase)
+			if rhErr != nil || strings.TrimSpace(webPath) == "" {
+				msg := "未获取到图片输出"
+				if rhErr != nil {
+					msg = rhErr.Error()
+				}
+				failed = append(failed, fmt.Sprintf("%s: %s", label, msg))
+				_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
+					"image_status":          "failed",
+					"image_current_task_id": "",
+					"image_last_error":      msg,
+					"updated_at":            time.Now(),
+				}).Error
+				BroadcastUpdate("store_visit_spot", spot.ID)
+				continue
+			}
+			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
+				"generated_image":          webPath,
+				"image_status":             "generated",
+				"image_current_task_id":    "",
+				"image_last_error":         "",
+				"image_generated_workflow": workflowDisplayNameFromPath(storeVisitImageWorkflowPath) + "（RunningHub）",
+				"updated_at":               time.Now(),
+			}).Error
+			BroadcastUpdate("store_visit_spot", spot.ID)
+			rhGenerated++
+			continue
+		}
+
+		promptID, err := QueueComfyPrompt(workflowJSON)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
+			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
+				"image_status":          "failed",
+				"image_current_task_id": "",
+				"image_last_error":      err.Error(),
+				"updated_at":            time.Now(),
+			}).Error
+			BroadcastUpdate("store_visit_spot", spot.ID)
+			continue
+		}
 		queued = append(queued, queuedStoreVisitSpotRender{
 			Spot:          spot,
 			PromptID:      promptID,
@@ -766,7 +813,7 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 	}
 
 	return gin.H{
-		"queued":            len(queued),
+		"queued":            len(queued) + rhGenerated,
 		"skipped_generated": skippedGenerated,
 		"skipped_missing":   skippedMissing,
 		"failed":            failed,
@@ -778,6 +825,17 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 	skippedGenerated := []string{}
 	failed := []string{}
 	queued := make([]queuedStoreVisitSpotRender, 0)
+
+	videoProvider := getConfiguredVideoGenerationProvider()
+	rhGenerated := 0
+	var rhVideoTemplate map[string]interface{}
+	if videoProvider == VideoGenerationProviderRunningHub {
+		tmpl, terr := loadStoreVisitWorkflowTemplate(storeVisitVideoWorkflowPath)
+		if terr != nil {
+			return nil, terr
+		}
+		rhVideoTemplate = tmpl
+	}
 
 	for idx, spot := range spots {
 		spotType := normalizeStoreVisitSpotType(spot.SpotType, spot.Name)
@@ -803,12 +861,8 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
 			continue
 		}
-		logComfyWorkflowPayload("Store Visit Video ComfyUI Payload", workflowLabel, workflowJSON)
-		promptID, err := QueueComfyPrompt(workflowJSON)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
-			continue
-		}
+		logComfyWorkflowPayload("Store Visit Video Payload", workflowLabel, workflowJSON)
+
 		if err := db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
 			"video_status":             "generating",
 			"video_current_task_id":    taskID,
@@ -821,6 +875,51 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 			continue
 		}
 		BroadcastUpdate("store_visit_spot", spot.ID)
+
+		if videoProvider == VideoGenerationProviderRunningHub {
+			saveDir := storeVisitVideosDir(project.Code)
+			fileBase := fmt.Sprintf("%s_%d", getStoreVisitSpotFileKey(spot), spot.ID)
+			webPath, rhErr := runRunningHubVideoTask(filepath.Base(storeVisitVideoWorkflowPath), rhVideoTemplate, workflowJSON, saveDir, fileBase)
+			if rhErr != nil || strings.TrimSpace(webPath) == "" {
+				msg := "未获取到视频输出"
+				if rhErr != nil {
+					msg = rhErr.Error()
+				}
+				failed = append(failed, fmt.Sprintf("%s: %s", label, msg))
+				_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
+					"video_status":          "failed",
+					"video_current_task_id": "",
+					"video_last_error":      msg,
+					"updated_at":            time.Now(),
+				}).Error
+				BroadcastUpdate("store_visit_spot", spot.ID)
+				continue
+			}
+			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
+				"generated_video":          webPath,
+				"video_status":             "generated",
+				"video_current_task_id":    "",
+				"video_last_error":         "",
+				"video_generated_workflow": workflowLabel + "（RunningHub）",
+				"updated_at":               time.Now(),
+			}).Error
+			BroadcastUpdate("store_visit_spot", spot.ID)
+			rhGenerated++
+			continue
+		}
+
+		promptID, err := QueueComfyPrompt(workflowJSON)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
+			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
+				"video_status":          "failed",
+				"video_current_task_id": "",
+				"video_last_error":      err.Error(),
+				"updated_at":            time.Now(),
+			}).Error
+			BroadcastUpdate("store_visit_spot", spot.ID)
+			continue
+		}
 		queued = append(queued, queuedStoreVisitSpotRender{
 			Spot:          spot,
 			PromptID:      promptID,
@@ -860,7 +959,7 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 	}
 
 	return gin.H{
-		"queued":            len(queued),
+		"queued":            len(queued) + rhGenerated,
 		"skipped_generated": skippedGenerated,
 		"skipped_missing":   skippedMissing,
 		"failed":            failed,

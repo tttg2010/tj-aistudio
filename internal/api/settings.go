@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -39,11 +40,20 @@ const (
 	KeyComfyUIAddress            = "comfyui_api_address"
 	KeyComfyUIModelsDir          = "comfyui_models_dir"
 	KeyFFmpegPath                = "ffmpeg_path"
+	KeyImageGenerationProvider   = "image_generation_provider"
+	KeyRunningHubAPIBase         = "runninghub_api_base"
+	KeyRunningHubAPIKey          = "runninghub_api_key"
+	KeyRunningHubWorkflowMap     = "runninghub_workflow_map"
+	KeyRunningHubInstanceType    = "runninghub_instance_type"
 )
 
 const (
-	VideoGenerationProviderLocal  = "local"
-	VideoGenerationProviderJimeng = "jimeng"
+	VideoGenerationProviderLocal      = "local"
+	VideoGenerationProviderJimeng     = "jimeng"
+	VideoGenerationProviderRunningHub = "runninghub"
+	ImageGenerationProviderLocal      = "local"
+	ImageGenerationProviderRunningHub = "runninghub"
+	defaultRunningHubAPIBase          = "https://www.runninghub.cn"
 	StoreVisitImageOrderBloggerFirst = "blogger_first"
 	StoreVisitImageOrderSceneFirst   = "scene_first"
 	GeneralGuideTransitionEngineLTX23 = "ltx2_3"
@@ -92,6 +102,11 @@ func InitDefaultSettings() {
 		KeyComfyUIAddress:       "127.0.0.1:8188",
 		KeyComfyUIModelsDir:     "",
 		KeyFFmpegPath:           "",
+		KeyImageGenerationProvider: ImageGenerationProviderLocal,
+		KeyRunningHubAPIBase:       defaultRunningHubAPIBase,
+		KeyRunningHubAPIKey:        "",
+		KeyRunningHubWorkflowMap:   "{}",
+		KeyRunningHubInstanceType:  "",
 	}
 
 	for key, value := range defaults {
@@ -176,6 +191,16 @@ func getDescription(key string) string {
 		return "ComfyUI 模型根目录"
 	case KeyFFmpegPath:
 		return "FFmpeg 可执行文件绝对路径（留空则尝试从 PATH 查找）"
+	case KeyImageGenerationProvider:
+		return "图片生成接入方式（local/runninghub）"
+	case KeyRunningHubAPIBase:
+		return "RunningHub API 地址"
+	case KeyRunningHubAPIKey:
+		return "RunningHub API Key"
+	case KeyRunningHubWorkflowMap:
+		return "本地 workflow 文件名 → RunningHub workflowId 的映射（JSON）"
+	case KeyRunningHubInstanceType:
+		return "RunningHub 机型（留空为默认，48G 机型填 plus）"
 	default:
 		return ""
 	}
@@ -249,6 +274,8 @@ func normalizeVideoGenerationProvider(raw string) string {
 		return VideoGenerationProviderLocal
 	case VideoGenerationProviderJimeng:
 		return VideoGenerationProviderJimeng
+	case VideoGenerationProviderRunningHub:
+		return VideoGenerationProviderRunningHub
 	default:
 		return VideoGenerationProviderLocal
 	}
@@ -260,6 +287,81 @@ func getConfiguredVideoGenerationProvider() string {
 		return normalizeVideoGenerationProvider(defaultSettingValue(KeyVideoGenerationProvider))
 	}
 	return normalizeVideoGenerationProvider(setting.Value)
+}
+
+func normalizeImageGenerationProvider(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", ImageGenerationProviderLocal:
+		return ImageGenerationProviderLocal
+	case ImageGenerationProviderRunningHub:
+		return ImageGenerationProviderRunningHub
+	default:
+		return ImageGenerationProviderLocal
+	}
+}
+
+func getConfiguredImageGenerationProvider() string {
+	var setting models.SystemSettings
+	if err := db.DB.Where("key = ?", KeyImageGenerationProvider).First(&setting).Error; err != nil {
+		return normalizeImageGenerationProvider(defaultSettingValue(KeyImageGenerationProvider))
+	}
+	return normalizeImageGenerationProvider(setting.Value)
+}
+
+func getSettingValue(key string) string {
+	var setting models.SystemSettings
+	if err := db.DB.Where("key = ?", key).First(&setting).Error; err == nil {
+		value := strings.TrimSpace(setting.Value)
+		if value != "" {
+			return value
+		}
+	}
+	return defaultSettingValue(key)
+}
+
+// runningHubConfig holds the resolved RunningHub connection settings.
+type runningHubConfig struct {
+	BaseURL      string
+	APIKey       string
+	InstanceType string
+}
+
+func getRunningHubConfig() runningHubConfig {
+	base := getSettingValue(KeyRunningHubAPIBase)
+	if !strings.HasPrefix(base, "http") {
+		base = "https://" + base
+	}
+	base = strings.TrimRight(base, "/")
+	return runningHubConfig{
+		BaseURL:      base,
+		APIKey:       strings.TrimSpace(getSettingValue(KeyRunningHubAPIKey)),
+		InstanceType: strings.TrimSpace(getSettingValue(KeyRunningHubInstanceType)),
+	}
+}
+
+// lookupRunningHubWorkflowID resolves the RunningHub workflowId mapped to a local
+// workflow template file name (e.g. "qwen_image.json"). Returns "" when unmapped.
+func lookupRunningHubWorkflowID(templateFileName string) string {
+	raw := strings.TrimSpace(getSettingValue(KeyRunningHubWorkflowMap))
+	if raw == "" {
+		return ""
+	}
+	mapping := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &mapping); err != nil {
+		return ""
+	}
+	if id, ok := mapping[templateFileName]; ok {
+		return strings.TrimSpace(id)
+	}
+	// Also try matching by base name in case the caller passes a full path.
+	base := templateFileName
+	if idx := strings.LastIndexAny(base, "/\\"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	if id, ok := mapping[base]; ok {
+		return strings.TrimSpace(id)
+	}
+	return ""
 }
 
 func getConfiguredJimengAPIBase() string {
@@ -496,6 +598,16 @@ func defaultSettingValue(key string) string {
 	case KeyComfyUIModelsDir:
 		return ""
 	case KeyFFmpegPath:
+		return ""
+	case KeyImageGenerationProvider:
+		return ImageGenerationProviderLocal
+	case KeyRunningHubAPIBase:
+		return defaultRunningHubAPIBase
+	case KeyRunningHubAPIKey:
+		return ""
+	case KeyRunningHubWorkflowMap:
+		return "{}"
+	case KeyRunningHubInstanceType:
 		return ""
 	default:
 		return ""

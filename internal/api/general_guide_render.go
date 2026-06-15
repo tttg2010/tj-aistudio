@@ -624,11 +624,12 @@ func HandleRenderGeneralGuideSceneImageTask(t *models.Task) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	sceneImageName, err := UploadToComfyUIInput(sceneRefAbs)
+	imageProvider := getConfiguredImageGenerationProvider()
+	sceneImageName, err := uploadReferenceImageForProvider(imageProvider, sceneRefAbs)
 	if err != nil {
 		return nil, err
 	}
-	presenterImageName, err := UploadToComfyUIInput(presenterRefAbs)
+	presenterImageName, err := uploadReferenceImageForProvider(imageProvider, presenterRefAbs)
 	if err != nil {
 		return nil, err
 	}
@@ -644,24 +645,29 @@ func HandleRenderGeneralGuideSceneImageTask(t *models.Task) (interface{}, error)
 		}
 		return nil, err
 	}
-	logComfyWorkflowPayload("General Guide Image ComfyUI Payload", workflowLabel, workflowJSON)
-	promptID, err := QueueComfyPrompt(workflowJSON)
-	if err != nil {
-		if shouldApplyGeneralGuideSceneImageTaskResult(scene.ID, t.ID) {
-			_ = db.DB.Model(&models.GeneralGuideScene{}).Where("id = ?", scene.ID).Updates(map[string]interface{}{
-				"image_status":          "failed",
-				"image_current_task_id": "",
-				"image_last_error":      err.Error(),
-				"updated_at":            time.Now(),
-			}).Error
+	logComfyWorkflowPayload("General Guide Image Payload", workflowLabel, workflowJSON)
+
+	var webPath string
+	if imageProvider == ImageGenerationProviderRunningHub {
+		saveDir := generalGuideImagesDir(project.Code)
+		fileBase := fmt.Sprintf("%s_%d", sceneKey, scene.ID)
+		webPath, err = runRunningHubImageTask(filepath.Base(generalGuideImageWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		if err == nil {
+			workflowLabel += "（RunningHub）"
+			Log(LogLevelInfo, "综合讲解图片已通过 RunningHub 生成", fmt.Sprintf("ProjectID: %d\nSceneID: %d\nWorkflow: %s", project.ID, scene.ID, workflowLabel))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")
 		}
-		return nil, err
+	} else {
+		var promptID string
+		promptID, err = QueueComfyPrompt(workflowJSON)
+		if err == nil {
+			Log(LogLevelInfo, "综合讲解图片已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nSceneID: %d\nPromptID: %s\nWorkflow: %s", project.ID, scene.ID, promptID, workflowLabel))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+			webPath, err = waitForGeneralGuideImageOutput(promptID, project.Code, sceneKey, scene.ID, func() bool {
+				return shouldApplyGeneralGuideSceneImageTaskResult(scene.ID, t.ID)
+			})
+		}
 	}
-	Log(LogLevelInfo, "综合讲解图片已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nSceneID: %d\nPromptID: %s\nWorkflow: %s", project.ID, scene.ID, promptID, workflowLabel))
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
-	webPath, err := waitForGeneralGuideImageOutput(promptID, project.Code, sceneKey, scene.ID, func() bool {
-		return shouldApplyGeneralGuideSceneImageTaskResult(scene.ID, t.ID)
-	})
 	if err != nil {
 		if shouldApplyGeneralGuideSceneImageTaskResult(scene.ID, t.ID) {
 			_ = db.DB.Model(&models.GeneralGuideScene{}).Where("id = ?", scene.ID).Updates(map[string]interface{}{

@@ -50,11 +50,18 @@ export default function Settings() {
         comfyui_api_address: "127.0.0.1:8188",
         comfyui_models_dir: "",
         ffmpeg_path: "",
+        image_generation_provider: "local",
+        runninghub_api_base: "https://www.runninghub.cn",
+        runninghub_api_key: "",
+        runninghub_instance_type: "",
+        runninghub_workflow_map: "{}",
     });
 
     const [checkResults, setCheckResults] = useState<ModelCheckResult[]>([]);
     const [isCheckModalOpen, setIsCheckModalOpen] = useState(false);
     const [checkingWorkflow, setCheckingWorkflow] = useState("");
+    const [rhTesting, setRhTesting] = useState(false);
+    const [rhStatus, setRhStatus] = useState<null | { ok: boolean; message: string }>(null);
 
     useEffect(() => {
         // Fetch Workflows
@@ -127,9 +134,51 @@ export default function Settings() {
             });
     };
 
+    const parseWorkflowMap = (): Record<string, string> => {
+        try {
+            const parsed = JSON.parse(settings.runninghub_workflow_map || "{}");
+            return parsed && typeof parsed === "object" ? parsed : {};
+        } catch {
+            return {};
+        }
+    };
+
+    const updateWorkflowMap = (fileName: string, workflowId: string) => {
+        const map = parseWorkflowMap();
+        if (workflowId.trim() === "") {
+            delete map[fileName];
+        } else {
+            map[fileName] = workflowId.trim();
+        }
+        updateSetting("runninghub_workflow_map", JSON.stringify(map));
+    };
+
+    const testRunningHubConnection = () => {
+        setRhTesting(true);
+        setRhStatus(null);
+        // Persist current settings first so the backend tests with the latest key/base.
+        axios.put("/api/settings", settings)
+            .then(() => axios.get("/api/runninghub/status"))
+            .then(res => {
+                const status = res.data?.status;
+                if (status === "online") {
+                    setRhStatus({ ok: true, message: "连接成功，API Key 有效" });
+                } else if (status === "unconfigured") {
+                    setRhStatus({ ok: false, message: res.data?.error || "请先填写 API Key" });
+                } else {
+                    setRhStatus({ ok: false, message: res.data?.error || "连接失败" });
+                }
+            })
+            .catch(err => {
+                setRhStatus({ ok: false, message: err.response?.data?.error || "请求失败" });
+            })
+            .finally(() => setRhTesting(false));
+    };
+
     const workflowList = Array.isArray(workflows) ? workflows : [];
     const imageWorkflows = workflowList.filter(w => w.type === "image" && w.workflow_name !== "Qwen-Image-Edit");
     const videoWorkflows = workflowList.filter(w => w.type === "video");
+    const workflowMap = parseWorkflowMap();
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -217,12 +266,124 @@ export default function Settings() {
                 </div>
             </div>
 
+            {/* 图片生成接入 */}
+            <div className="bg-card p-6 rounded-lg border border-border shadow-sm">
+                <h2 className="text-xl font-semibold mb-4 text-primary">图片生成接入</h2>
+                <div className="space-y-6">
+                    <div>
+                        <label className="block text-sm font-medium mb-2">图片生成方式</label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                onClick={() => updateSetting("image_generation_provider", "local")}
+                                className={`rounded-md border px-4 py-3 text-left transition-colors ${
+                                    settings.image_generation_provider === "local"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border hover:bg-accent"
+                                }`}
+                            >
+                                <div className="font-medium">本地 ComfyUI</div>
+                                <div className="text-xs text-muted-foreground mt-1">把工作流提交给本机 ComfyUI 出图，依赖本地显卡。</div>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => updateSetting("image_generation_provider", "runninghub")}
+                                className={`rounded-md border px-4 py-3 text-left transition-colors ${
+                                    settings.image_generation_provider === "runninghub"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border hover:bg-accent"
+                                }`}
+                            >
+                                <div className="font-medium">RunningHub.cn 云端</div>
+                                <div className="text-xs text-muted-foreground mt-1">把工作流发到 RunningHub 云端出图，无需本地显卡。需先在 RunningHub 上传工作流并填写映射。</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    {settings.image_generation_provider === "runninghub" && (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">RunningHub API 地址</label>
+                                    <Input
+                                        value={settings.runninghub_api_base}
+                                        onChange={e => updateSetting("runninghub_api_base", e.target.value)}
+                                        placeholder="https://www.runninghub.cn"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">默认官方地址，通常无需修改。</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">RunningHub API Key</label>
+                                    <Input
+                                        type="password"
+                                        value={settings.runninghub_api_key}
+                                        onChange={e => updateSetting("runninghub_api_key", e.target.value)}
+                                        placeholder="账户设置 → API 控制台 获取的 32 位 Key"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">机型（可选）</label>
+                                    <Input
+                                        value={settings.runninghub_instance_type}
+                                        onChange={e => updateSetting("runninghub_instance_type", e.target.value)}
+                                        placeholder="留空为默认；48G 机型填 plus"
+                                    />
+                                </div>
+                                <div className="flex items-end gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={testRunningHubConnection}
+                                        disabled={rhTesting}
+                                        className="flex items-center gap-2 bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:bg-secondary/80 transition-colors disabled:opacity-50"
+                                    >
+                                        {rhTesting ? "测试中…" : "测试连接"}
+                                    </button>
+                                    {rhStatus && (
+                                        <span className={`flex items-center gap-1 text-sm ${rhStatus.ok ? "text-green-600" : "text-red-600"}`}>
+                                            {rhStatus.ok ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                                            {rhStatus.message}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Workflow 映射（本地工作流 → RunningHub workflowId）</label>
+                                <p className="text-xs text-muted-foreground mb-3">
+                                    RunningHub 只能运行已发布到平台的工作流。请把要用的本地工作流在 runninghub.cn 上传发布，拿到 workflowId（在工作流页面的浏览器地址里），填到对应行。未填写的工作流走 RunningHub 时会报错。
+                                </p>
+                                <div className="border border-border rounded-md divide-y divide-border">
+                                    {workflowList.filter(w => w.file_name).map(w => (
+                                        <div key={w.file_name} className="flex items-center gap-3 px-3 py-2">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium truncate">{w.workflow_name || w.file_name}</div>
+                                                <div className="text-xs text-muted-foreground truncate">{w.file_name} · {w.type}</div>
+                                            </div>
+                                            <Input
+                                                className="w-56"
+                                                value={workflowMap[w.file_name as string] || ""}
+                                                onChange={e => updateWorkflowMap(w.file_name as string, e.target.value)}
+                                                placeholder="RunningHub workflowId"
+                                            />
+                                        </div>
+                                    ))}
+                                    {workflowList.filter(w => w.file_name).length === 0 && (
+                                        <div className="px-3 py-4 text-sm text-muted-foreground">未发现本地工作流。</div>
+                                    )}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2">提示：第一期已接入「综合讲解 — 场景图片」，对应工作流文件 <code>image_firered_image_edit1_1.json</code>，先映射它即可端到端验证。</p>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
             <div className="bg-card p-6 rounded-lg border border-border shadow-sm">
                 <h2 className="text-xl font-semibold mb-4 text-primary">视频生成接入</h2>
                 <div className="space-y-6">
                     <div>
                         <label className="block text-sm font-medium mb-2">视频生成方式</label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <button
                                 type="button"
                                 onClick={() => updateSetting("video_generation_provider", "local")}
@@ -246,6 +407,18 @@ export default function Settings() {
                             >
                                 <div className="font-medium">即梦在线模型</div>
                                 <div className="text-xs text-muted-foreground mt-1">使用即梦视频 3.0 Pro 图生视频接口，提交首帧图与视频提示词后在线生成并自动回收结果。</div>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => updateSetting("video_generation_provider", "runninghub")}
+                                className={`rounded-md border px-4 py-3 text-left transition-colors ${
+                                    settings.video_generation_provider === "runninghub"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border hover:bg-accent"
+                                }`}
+                            >
+                                <div className="font-medium">RunningHub.cn 云端</div>
+                                <div className="text-xs text-muted-foreground mt-1">把视频工作流发到 RunningHub 云端出片（图生视频），无需本地显卡。需在上方 RunningHub 配置 API Key，并映射对应的视频工作流（如 <code>video_new_ltx2_3_i2v.json</code>）。</div>
                             </button>
                         </div>
                     </div>

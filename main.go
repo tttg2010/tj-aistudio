@@ -361,6 +361,9 @@ func main() {
 		apiGroup.GET("/comfyui/check_models", api.CheckWorkflowModels)
 		apiGroup.GET("/comfyui/status", api.GetComfyUIStatus)
 
+		// RunningHub Routes
+		apiGroup.GET("/runninghub/status", api.GetRunningHubStatus)
+
 		// System Routes
 		apiGroup.GET("/system/info", api.GetSystemInfo)
 		apiGroup.GET("/system/monitor", api.GetSystemMonitor)

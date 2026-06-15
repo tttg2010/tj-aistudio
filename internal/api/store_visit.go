@@ -1687,7 +1687,12 @@ func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.Sto
 	if err != nil {
 		return nil, "", err
 	}
-	uploadedName, err := UploadToComfyUIInput(imageAbsPath)
+	var uploadedName string
+	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
+		uploadedName, err = runningHubUploadImage(imageAbsPath)
+	} else {
+		uploadedName, err = UploadToComfyUIInput(imageAbsPath)
+	}
 	if err != nil {
 		setInput(imageNodeID, "image", imageAbsPath)
 	} else {
@@ -1856,7 +1861,8 @@ func HandleRenderStoreVisitSpotImageTask(t *models.Task) (interface{}, error) {
 		return nil, err
 	}
 
-	bloggerImageName, err := UploadToComfyUIInput(bloggerRefAbs)
+	imageProvider := getConfiguredImageGenerationProvider()
+	bloggerImageName, err := uploadReferenceImageForProvider(imageProvider, bloggerRefAbs)
 	if err != nil {
 		_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
 			"image_status":          "failed",
@@ -1866,7 +1872,7 @@ func HandleRenderStoreVisitSpotImageTask(t *models.Task) (interface{}, error) {
 		}).Error
 		return nil, err
 	}
-	spotImageName, err := UploadToComfyUIInput(spotRefAbs)
+	spotImageName, err := uploadReferenceImageForProvider(imageProvider, spotRefAbs)
 	if err != nil {
 		_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
 			"image_status":          "failed",
@@ -1890,25 +1896,28 @@ func HandleRenderStoreVisitSpotImageTask(t *models.Task) (interface{}, error) {
 		return nil, err
 	}
 
-	logComfyWorkflowPayload("Store Visit Image ComfyUI Payload", workflowDisplayNameFromPath(storeVisitImageWorkflowPath), workflowJSON)
-	promptID, err := QueueComfyPrompt(workflowJSON)
-	if err != nil {
-		if shouldApplyStoreVisitImageTaskResult(spot.ID, t.ID) {
-			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
-				"image_status":          "failed",
-				"image_current_task_id": "",
-				"image_last_error":      err.Error(),
-				"updated_at":            time.Now(),
-			}).Error
-		}
-		return nil, err
-	}
-	Log(LogLevelInfo, fmt.Sprintf("博主探店%s图片已提交到 ComfyUI 队列", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d\nPromptID: %s", project.ID, spot.ID, promptID))
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+	logComfyWorkflowPayload("Store Visit Image Payload", workflowDisplayNameFromPath(storeVisitImageWorkflowPath), workflowJSON)
 
-	webPath, err := waitForStoreVisitImageOutput(promptID, project.Code, spotKey, spot.ID, func() bool {
-		return shouldApplyStoreVisitImageTaskResult(spot.ID, t.ID)
-	})
+	var webPath string
+	if imageProvider == ImageGenerationProviderRunningHub {
+		saveDir := storeVisitImagesDir(project.Code)
+		fileBase := fmt.Sprintf("%s_%d", spotKey, spot.ID)
+		webPath, err = runRunningHubImageTask(filepath.Base(storeVisitImageWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		if err == nil {
+			Log(LogLevelInfo, fmt.Sprintf("博主探店%s图片已通过 RunningHub 生成", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d", project.ID, spot.ID))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")
+		}
+	} else {
+		var promptID string
+		promptID, err = QueueComfyPrompt(workflowJSON)
+		if err == nil {
+			Log(LogLevelInfo, fmt.Sprintf("博主探店%s图片已提交到 ComfyUI 队列", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d\nPromptID: %s", project.ID, spot.ID, promptID))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+			webPath, err = waitForStoreVisitImageOutput(promptID, project.Code, spotKey, spot.ID, func() bool {
+				return shouldApplyStoreVisitImageTaskResult(spot.ID, t.ID)
+			})
+		}
+	}
 	if err != nil {
 		if shouldApplyStoreVisitImageTaskResult(spot.ID, t.ID) {
 			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
@@ -1981,25 +1990,33 @@ func HandleRenderStoreVisitSpotVideoTask(t *models.Task) (interface{}, error) {
 		return nil, err
 	}
 
-	logComfyWorkflowPayload("Store Visit Video ComfyUI Payload", workflowLabel, workflowJSON)
-	promptID, err := QueueComfyPrompt(workflowJSON)
-	if err != nil {
-		if shouldApplyStoreVisitVideoTaskResult(spot.ID, t.ID) {
-			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
-				"video_status":          "failed",
-				"video_current_task_id": "",
-				"video_last_error":      err.Error(),
-				"updated_at":            time.Now(),
-			}).Error
-		}
-		return nil, err
-	}
-	Log(LogLevelInfo, fmt.Sprintf("博主探店%s视频已提交到 ComfyUI 队列", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d\nPromptID: %s\nWorkflow: %s", project.ID, spot.ID, promptID, strings.TrimSpace(workflowLabel)))
+	logComfyWorkflowPayload("Store Visit Video Payload", workflowLabel, workflowJSON)
 
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
-	webPath, err := waitForStoreVisitVideoOutput(promptID, project.Code, spotKey, spot.ID, func() bool {
-		return shouldApplyStoreVisitVideoTaskResult(spot.ID, t.ID)
-	})
+	var webPath string
+	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
+		template, terr := loadStoreVisitWorkflowTemplate(storeVisitVideoWorkflowPath)
+		if terr != nil {
+			err = terr
+		} else {
+			saveDir := storeVisitVideosDir(project.Code)
+			fileBase := fmt.Sprintf("%s_%d", spotKey, spot.ID)
+			webPath, err = runRunningHubVideoTask(filepath.Base(storeVisitVideoWorkflowPath), template, workflowJSON, saveDir, fileBase)
+			if err == nil {
+				Log(LogLevelInfo, fmt.Sprintf("博主探店%s视频已通过 RunningHub 生成", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d", project.ID, spot.ID))
+				task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")
+			}
+		}
+	} else {
+		var promptID string
+		promptID, err = QueueComfyPrompt(workflowJSON)
+		if err == nil {
+			Log(LogLevelInfo, fmt.Sprintf("博主探店%s视频已提交到 ComfyUI 队列", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d\nPromptID: %s\nWorkflow: %s", project.ID, spot.ID, promptID, strings.TrimSpace(workflowLabel)))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+			webPath, err = waitForStoreVisitVideoOutput(promptID, project.Code, spotKey, spot.ID, func() bool {
+				return shouldApplyStoreVisitVideoTaskResult(spot.ID, t.ID)
+			})
+		}
+	}
 	if err != nil {
 		if shouldApplyStoreVisitVideoTaskResult(spot.ID, t.ID) {
 			_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
