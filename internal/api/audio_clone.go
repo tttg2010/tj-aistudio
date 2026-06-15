@@ -724,15 +724,21 @@ func GenerateAudioCloneProjectLines(c *gin.Context) {
 			seed = seedForBatch
 		}
 		lineCopy.Seed = seed
-		promptID, workflowLabel, err := queueAudioCloneLinePrompt(*project, lineCopy, seed)
-		if err != nil {
-			_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":     audioCloneLineStatusFailed,
-				"last_error": err.Error(),
-				"seed":       seed,
-				"updated_at": time.Now(),
-			}).Error
-			continue
+		// For RunningHub, defer the (minutes-long) job to the background worker via an
+		// empty promptID instead of blocking this HTTP request. Local pre-queues here.
+		var promptID, workflowLabel string
+		if getConfiguredAudioGenerationProvider() != AudioGenerationProviderRunningHub {
+			var err error
+			promptID, _, workflowLabel, err = queueAudioCloneLinePrompt(*project, lineCopy, seed)
+			if err != nil {
+				_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
+					"status":     audioCloneLineStatusFailed,
+					"last_error": err.Error(),
+					"seed":       seed,
+					"updated_at": time.Now(),
+				}).Error
+				continue
+			}
 		}
 		taskID, err := startAudioCloneLineTask(&lineCopy, project, seed, promptID, workflowLabel)
 		if err != nil {

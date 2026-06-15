@@ -146,33 +146,52 @@ func buildQwenTTSWorkflow(template map[string]interface{}, referenceAudioName st
 	return workflowJSON, workflowDisplayNameFromPath(qwenTTSWorkflowPath), nil
 }
 
-func queueQwenTTSLinePrompt(project models.QwenTTSProject, line models.QwenTTSLine, seed int64) (string, string, error) {
+// queueQwenTTSLinePrompt builds and submits a Qwen3 TTS line. Returns
+// (promptID, webPath, workflowLabel, err): for local ComfyUI promptID is set and
+// the caller polls it; for RunningHub the audio is produced synchronously here
+// and webPath is set (promptID empty).
+func queueQwenTTSLinePrompt(project models.QwenTTSProject, line models.QwenTTSLine, seed int64) (string, string, string, error) {
 	var character models.QwenTTSCharacter
 	if err := db.DB.Where("project_id = ? AND name = ?", project.ID, line.CharacterName).First(&character).Error; err != nil {
-		return "", "", fmt.Errorf("character %s not found: %w", line.CharacterName, err)
+		return "", "", "", fmt.Errorf("character %s not found: %w", line.CharacterName, err)
 	}
 	referenceAudioAbs, err := assetWebPathToAbs(character.ReferenceAudio)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	referenceAudioName, err := UploadToComfyUIInput(referenceAudioAbs)
+	audioProvider := getConfiguredAudioGenerationProvider()
+	var referenceAudioName string
+	if audioProvider == AudioGenerationProviderRunningHub {
+		referenceAudioName, err = runningHubUploadAudio(referenceAudioAbs)
+	} else {
+		referenceAudioName, err = UploadToComfyUIInput(referenceAudioAbs)
+	}
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	template, err := loadStoreVisitWorkflowTemplate(qwenTTSWorkflowPath)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	workflowJSON, workflowLabel, err := buildQwenTTSWorkflow(template, referenceAudioName, character.ReferenceText, line.Text, project, line, seed)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	logComfyWorkflowPayload("Qwen3 TTS ComfyUI Payload", workflowLabel, workflowJSON)
+	logComfyWorkflowPayload("Qwen3 TTS Payload", workflowLabel, workflowJSON)
+	if audioProvider == AudioGenerationProviderRunningHub {
+		saveDir := qwenTTSGeneratedDir(project.Code)
+		fileBase := fmt.Sprintf("line_%02d_%d", line.SortOrder, line.ID)
+		webPath, rhErr := runRunningHubAudioTask(filepath.Base(qwenTTSWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		if rhErr != nil {
+			return "", "", "", rhErr
+		}
+		return "", webPath, workflowLabel + "（RunningHub）", nil
+	}
 	promptID, err := QueueComfyPrompt(workflowJSON)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return promptID, workflowLabel, nil
+	return promptID, "", workflowLabel, nil
 }
 
 func buildQwenTTSReferenceRecognitionWorkflow(template map[string]interface{}, referenceAudioName string) (map[string]interface{}, string, error) {
@@ -463,9 +482,10 @@ func HandleRenderQwenTTSLineTask(t *models.Task) (interface{}, error) {
 	}
 	promptID := strings.TrimSpace(payload.PromptID)
 	workflowLabel := strings.TrimSpace(payload.WorkflowLabel)
+	var webPath string
 	if promptID == "" {
 		var err error
-		promptID, workflowLabel, err = queueQwenTTSLinePrompt(project, line, payload.Seed)
+		promptID, webPath, workflowLabel, err = queueQwenTTSLinePrompt(project, line, payload.Seed)
 		if err != nil {
 			if shouldApplyQwenTTSLineTaskResult(line.ID, t.ID) {
 				_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
@@ -478,36 +498,40 @@ func HandleRenderQwenTTSLineTask(t *models.Task) (interface{}, error) {
 			return nil, err
 		}
 	}
-	if promptID == "" {
-		err := fmt.Errorf("missing qwen tts prompt id")
-		if shouldApplyQwenTTSLineTaskResult(line.ID, t.ID) {
-			_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":          audioCloneLineStatusFailed,
-				"current_task_id": "",
-				"last_error":      err.Error(),
-				"updated_at":      time.Now(),
-			}).Error
+	// webPath empty → local ComfyUI path: poll the prompt to completion.
+	if strings.TrimSpace(webPath) == "" {
+		if promptID == "" {
+			err := fmt.Errorf("missing qwen tts prompt id")
+			if shouldApplyQwenTTSLineTaskResult(line.ID, t.ID) {
+				_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
+					"status":          audioCloneLineStatusFailed,
+					"current_task_id": "",
+					"last_error":      err.Error(),
+					"updated_at":      time.Now(),
+				}).Error
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	Log(LogLevelInfo, "Qwen3 TTS 任务已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nLineID: %d\nPromptID: %s\nWorkflow: %s", project.ID, line.ID, promptID, workflowLabel))
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
-	webPath, err := waitForQwenTTSOutput(promptID, project.Code, line, func() bool {
-		return shouldApplyQwenTTSLineTaskResult(line.ID, t.ID)
-	})
-	if err != nil {
-		if shouldApplyQwenTTSLineTaskResult(line.ID, t.ID) {
-			_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":          audioCloneLineStatusFailed,
-				"current_task_id": "",
-				"last_error":      err.Error(),
-				"updated_at":      time.Now(),
-			}).Error
+		Log(LogLevelInfo, "Qwen3 TTS 任务已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nLineID: %d\nPromptID: %s\nWorkflow: %s", project.ID, line.ID, promptID, workflowLabel))
+		task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+		var err error
+		webPath, err = waitForQwenTTSOutput(promptID, project.Code, line, func() bool {
+			return shouldApplyQwenTTSLineTaskResult(line.ID, t.ID)
+		})
+		if err != nil {
+			if shouldApplyQwenTTSLineTaskResult(line.ID, t.ID) {
+				_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
+					"status":          audioCloneLineStatusFailed,
+					"current_task_id": "",
+					"last_error":      err.Error(),
+					"updated_at":      time.Now(),
+				}).Error
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 	if strings.TrimSpace(webPath) == "" {
-		err = fmt.Errorf("未获取到 Qwen3 TTS 输出")
+		err := fmt.Errorf("未获取到 Qwen3 TTS 输出")
 		if shouldApplyQwenTTSLineTaskResult(line.ID, t.ID) {
 			_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
 				"status":          audioCloneLineStatusFailed,

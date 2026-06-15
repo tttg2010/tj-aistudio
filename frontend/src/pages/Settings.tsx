@@ -55,6 +55,7 @@ export default function Settings() {
         runninghub_api_key: "",
         runninghub_instance_type: "",
         runninghub_workflow_map: "{}",
+        audio_generation_provider: "local",
     });
 
     const [checkResults, setCheckResults] = useState<ModelCheckResult[]>([]);
@@ -474,6 +475,40 @@ export default function Settings() {
                             </select>
                             <p className="text-xs text-muted-foreground mt-1">这里只决定即梦在线模型的官方画幅预设，不影响本地 ComfyUI 视频宽高。视频时长不在这里配置，提交时会直接使用当前镜头的 duration_seconds，并按 24fps 自动换算成 frames。</p>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 音频 / TTS 生成接入 */}
+            <div className="bg-card p-6 rounded-lg border border-border shadow-sm">
+                <h2 className="text-xl font-semibold mb-4 text-primary">音频 / TTS 生成接入</h2>
+                <div>
+                    <label className="block text-sm font-medium mb-2">音频生成方式</label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <button
+                            type="button"
+                            onClick={() => updateSetting("audio_generation_provider", "local")}
+                            className={`rounded-md border px-4 py-3 text-left transition-colors ${
+                                settings.audio_generation_provider === "local"
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border hover:bg-accent"
+                            }`}
+                        >
+                            <div className="font-medium">本地 ComfyUI</div>
+                            <div className="text-xs text-muted-foreground mt-1">配音、语音克隆、Qwen3 TTS 走本机 ComfyUI。</div>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => updateSetting("audio_generation_provider", "runninghub")}
+                            className={`rounded-md border px-4 py-3 text-left transition-colors ${
+                                settings.audio_generation_provider === "runninghub"
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border hover:bg-accent"
+                            }`}
+                        >
+                            <div className="font-medium">RunningHub.cn 云端</div>
+                            <div className="text-xs text-muted-foreground mt-1">音频生产、Qwen3 TTS、LongCat 语音克隆走 RunningHub。需在上方配置 API Key，并映射对应的音频工作流（如 <code>Qwen3-TTS Voice Clone (Reference).json</code>、<code>LongCat-AudioDIT-TTS.json</code> 等）。</div>
+                        </button>
                     </div>
                 </div>
             </div>

@@ -169,7 +169,12 @@ func buildGeneralGuideVideoWorkflow(scene models.GeneralGuideScene, project mode
 	if err != nil {
 		return nil, "", err
 	}
-	uploadedName, err := UploadToComfyUIInput(imageAbsPath)
+	var uploadedName string
+	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
+		uploadedName, err = runningHubUploadImage(imageAbsPath)
+	} else {
+		uploadedName, err = UploadToComfyUIInput(imageAbsPath)
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -733,24 +738,34 @@ func HandleRenderGeneralGuideSceneVideoTask(t *models.Task) (interface{}, error)
 		}
 		return nil, err
 	}
-	logComfyWorkflowPayload("General Guide Video ComfyUI Payload", workflowLabel, workflowJSON)
-	promptID, err := QueueComfyPrompt(workflowJSON)
-	if err != nil {
-		if shouldApplyGeneralGuideSceneVideoTaskResult(scene.ID, t.ID) {
-			_ = db.DB.Model(&models.GeneralGuideScene{}).Where("id = ?", scene.ID).Updates(map[string]interface{}{
-				"video_status":          "failed",
-				"video_current_task_id": "",
-				"video_last_error":      err.Error(),
-				"updated_at":            time.Now(),
-			}).Error
+	logComfyWorkflowPayload("General Guide Video Payload", workflowLabel, workflowJSON)
+
+	var webPath string
+	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
+		template, terr := loadStoreVisitWorkflowTemplate(storeVisitVideoWorkflowPath)
+		if terr != nil {
+			err = terr
+		} else {
+			saveDir := generalGuideVideosDir(project.Code)
+			fileBase := fmt.Sprintf("%s_%d", sceneKey, scene.ID)
+			webPath, err = runRunningHubVideoTask(filepath.Base(storeVisitVideoWorkflowPath), template, workflowJSON, saveDir, fileBase)
+			if err == nil {
+				workflowLabel += "（RunningHub）"
+				Log(LogLevelInfo, "综合讲解视频已通过 RunningHub 生成", fmt.Sprintf("ProjectID: %d\nSceneID: %d", project.ID, scene.ID))
+				task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")
+			}
 		}
-		return nil, err
+	} else {
+		var promptID string
+		promptID, err = QueueComfyPrompt(workflowJSON)
+		if err == nil {
+			Log(LogLevelInfo, "综合讲解视频已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nSceneID: %d\nPromptID: %s\nWorkflow: %s", project.ID, scene.ID, promptID, workflowLabel))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+			webPath, err = waitForGeneralGuideVideoOutput(promptID, project.Code, sceneKey, scene.ID, func() bool {
+				return shouldApplyGeneralGuideSceneVideoTaskResult(scene.ID, t.ID)
+			})
+		}
 	}
-	Log(LogLevelInfo, "综合讲解视频已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nSceneID: %d\nPromptID: %s\nWorkflow: %s", project.ID, scene.ID, promptID, workflowLabel))
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
-	webPath, err := waitForGeneralGuideVideoOutput(promptID, project.Code, sceneKey, scene.ID, func() bool {
-		return shouldApplyGeneralGuideSceneVideoTaskResult(scene.ID, t.ID)
-	})
 	if err != nil {
 		if shouldApplyGeneralGuideSceneVideoTaskResult(scene.ID, t.ID) {
 			_ = db.DB.Model(&models.GeneralGuideScene{}).Where("id = ?", scene.ID).Updates(map[string]interface{}{

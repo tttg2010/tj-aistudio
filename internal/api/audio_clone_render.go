@@ -126,33 +126,51 @@ func buildAudioCloneWorkflow(template map[string]interface{}, referenceAudioName
 	return workflowJSON, workflowDisplayNameFromPath(audioCloneWorkflowPath), nil
 }
 
-func queueAudioCloneLinePrompt(project models.AudioCloneProject, line models.AudioCloneLine, seed int64) (string, string, error) {
+// queueAudioCloneLinePrompt builds and submits an audio-clone line. Returns
+// (promptID, webPath, workflowLabel, err): local sets promptID for the caller to
+// poll; RunningHub produces the audio synchronously here and sets webPath.
+func queueAudioCloneLinePrompt(project models.AudioCloneProject, line models.AudioCloneLine, seed int64) (string, string, string, error) {
 	var character models.AudioCloneCharacter
 	if err := db.DB.Where("project_id = ? AND name = ?", project.ID, line.CharacterName).First(&character).Error; err != nil {
-		return "", "", fmt.Errorf("character %s not found: %w", line.CharacterName, err)
+		return "", "", "", fmt.Errorf("character %s not found: %w", line.CharacterName, err)
 	}
 	referenceAudioAbs, err := assetWebPathToAbs(character.ReferenceAudio)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	referenceAudioName, err := UploadToComfyUIInput(referenceAudioAbs)
+	audioProvider := getConfiguredAudioGenerationProvider()
+	var referenceAudioName string
+	if audioProvider == AudioGenerationProviderRunningHub {
+		referenceAudioName, err = runningHubUploadAudio(referenceAudioAbs)
+	} else {
+		referenceAudioName, err = UploadToComfyUIInput(referenceAudioAbs)
+	}
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	template, err := loadStoreVisitWorkflowTemplate(audioCloneWorkflowPath)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	workflowJSON, workflowLabel, err := buildAudioCloneWorkflow(template, referenceAudioName, character.ReferenceText, line.Text, project, line, seed)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	logComfyWorkflowPayload("Audio Clone ComfyUI Payload", workflowLabel, workflowJSON)
+	logComfyWorkflowPayload("Audio Clone Payload", workflowLabel, workflowJSON)
+	if audioProvider == AudioGenerationProviderRunningHub {
+		saveDir := audioCloneGeneratedDir(project.Code)
+		fileBase := fmt.Sprintf("line_%02d_%d", line.SortOrder, line.ID)
+		webPath, rhErr := runRunningHubAudioTask(filepath.Base(audioCloneWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		if rhErr != nil {
+			return "", "", "", rhErr
+		}
+		return "", webPath, workflowLabel + "（RunningHub）", nil
+	}
 	promptID, err := QueueComfyPrompt(workflowJSON)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return promptID, workflowLabel, nil
+	return promptID, "", workflowLabel, nil
 }
 
 func buildAudioCloneReferenceRecognitionWorkflow(template map[string]interface{}, referenceAudioName string) (map[string]interface{}, string, error) {
@@ -384,9 +402,10 @@ func HandleRenderAudioCloneLineTask(t *models.Task) (interface{}, error) {
 	}
 	promptID := strings.TrimSpace(payload.PromptID)
 	workflowLabel := strings.TrimSpace(payload.WorkflowLabel)
+	var webPath string
 	if promptID == "" {
 		var err error
-		promptID, workflowLabel, err = queueAudioCloneLinePrompt(project, line, payload.Seed)
+		promptID, webPath, workflowLabel, err = queueAudioCloneLinePrompt(project, line, payload.Seed)
 		if err != nil {
 			if shouldApplyAudioCloneLineTaskResult(line.ID, t.ID) {
 				_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
@@ -399,36 +418,40 @@ func HandleRenderAudioCloneLineTask(t *models.Task) (interface{}, error) {
 			return nil, err
 		}
 	}
-	if promptID == "" {
-		err := fmt.Errorf("missing audio clone prompt id")
-		if shouldApplyAudioCloneLineTaskResult(line.ID, t.ID) {
-			_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":          audioCloneLineStatusFailed,
-				"current_task_id": "",
-				"last_error":      err.Error(),
-				"updated_at":      time.Now(),
-			}).Error
+	// webPath empty → local ComfyUI path: poll the prompt to completion.
+	if strings.TrimSpace(webPath) == "" {
+		if promptID == "" {
+			err := fmt.Errorf("missing audio clone prompt id")
+			if shouldApplyAudioCloneLineTaskResult(line.ID, t.ID) {
+				_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
+					"status":          audioCloneLineStatusFailed,
+					"current_task_id": "",
+					"last_error":      err.Error(),
+					"updated_at":      time.Now(),
+				}).Error
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	Log(LogLevelInfo, "音频复制任务已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nLineID: %d\nPromptID: %s\nWorkflow: %s", project.ID, line.ID, promptID, workflowLabel))
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
-	webPath, err := waitForAudioCloneOutput(promptID, project.Code, line, func() bool {
-		return shouldApplyAudioCloneLineTaskResult(line.ID, t.ID)
-	})
-	if err != nil {
-		if shouldApplyAudioCloneLineTaskResult(line.ID, t.ID) {
-			_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":          audioCloneLineStatusFailed,
-				"current_task_id": "",
-				"last_error":      err.Error(),
-				"updated_at":      time.Now(),
-			}).Error
+		Log(LogLevelInfo, "音频复制任务已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nLineID: %d\nPromptID: %s\nWorkflow: %s", project.ID, line.ID, promptID, workflowLabel))
+		task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+		var err error
+		webPath, err = waitForAudioCloneOutput(promptID, project.Code, line, func() bool {
+			return shouldApplyAudioCloneLineTaskResult(line.ID, t.ID)
+		})
+		if err != nil {
+			if shouldApplyAudioCloneLineTaskResult(line.ID, t.ID) {
+				_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
+					"status":          audioCloneLineStatusFailed,
+					"current_task_id": "",
+					"last_error":      err.Error(),
+					"updated_at":      time.Now(),
+				}).Error
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 	if strings.TrimSpace(webPath) == "" {
-		err = fmt.Errorf("未获取到音频复制输出")
+		err := fmt.Errorf("未获取到音频复制输出")
 		if shouldApplyAudioCloneLineTaskResult(line.ID, t.ID) {
 			_ = db.DB.Model(&models.AudioCloneLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
 				"status":          audioCloneLineStatusFailed,

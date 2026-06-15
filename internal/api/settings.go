@@ -45,6 +45,7 @@ const (
 	KeyRunningHubAPIKey          = "runninghub_api_key"
 	KeyRunningHubWorkflowMap     = "runninghub_workflow_map"
 	KeyRunningHubInstanceType    = "runninghub_instance_type"
+	KeyAudioGenerationProvider   = "audio_generation_provider"
 )
 
 const (
@@ -53,6 +54,8 @@ const (
 	VideoGenerationProviderRunningHub = "runninghub"
 	ImageGenerationProviderLocal      = "local"
 	ImageGenerationProviderRunningHub = "runninghub"
+	AudioGenerationProviderLocal      = "local"
+	AudioGenerationProviderRunningHub = "runninghub"
 	defaultRunningHubAPIBase          = "https://www.runninghub.cn"
 	StoreVisitImageOrderBloggerFirst = "blogger_first"
 	StoreVisitImageOrderSceneFirst   = "scene_first"
@@ -107,6 +110,7 @@ func InitDefaultSettings() {
 		KeyRunningHubAPIKey:        "",
 		KeyRunningHubWorkflowMap:   "{}",
 		KeyRunningHubInstanceType:  "",
+		KeyAudioGenerationProvider: AudioGenerationProviderLocal,
 	}
 
 	for key, value := range defaults {
@@ -201,6 +205,8 @@ func getDescription(key string) string {
 		return "本地 workflow 文件名 → RunningHub workflowId 的映射（JSON）"
 	case KeyRunningHubInstanceType:
 		return "RunningHub 机型（留空为默认，48G 机型填 plus）"
+	case KeyAudioGenerationProvider:
+		return "音频/TTS 生成接入方式（local/runninghub）"
 	default:
 		return ""
 	}
@@ -306,6 +312,25 @@ func getConfiguredImageGenerationProvider() string {
 		return normalizeImageGenerationProvider(defaultSettingValue(KeyImageGenerationProvider))
 	}
 	return normalizeImageGenerationProvider(setting.Value)
+}
+
+func normalizeAudioGenerationProvider(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", AudioGenerationProviderLocal:
+		return AudioGenerationProviderLocal
+	case AudioGenerationProviderRunningHub:
+		return AudioGenerationProviderRunningHub
+	default:
+		return AudioGenerationProviderLocal
+	}
+}
+
+func getConfiguredAudioGenerationProvider() string {
+	var setting models.SystemSettings
+	if err := db.DB.Where("key = ?", KeyAudioGenerationProvider).First(&setting).Error; err != nil {
+		return normalizeAudioGenerationProvider(defaultSettingValue(KeyAudioGenerationProvider))
+	}
+	return normalizeAudioGenerationProvider(setting.Value)
 }
 
 func getSettingValue(key string) string {
@@ -609,6 +634,8 @@ func defaultSettingValue(key string) string {
 		return "{}"
 	case KeyRunningHubInstanceType:
 		return ""
+	case KeyAudioGenerationProvider:
+		return AudioGenerationProviderLocal
 	default:
 		return ""
 	}

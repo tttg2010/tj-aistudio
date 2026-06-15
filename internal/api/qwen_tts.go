@@ -2490,15 +2490,21 @@ func GenerateQwenTTSProjectLines(c *gin.Context) {
 			seed = seedForBatch
 		}
 		lineCopy.Seed = seed
-		promptID, workflowLabel, err := queueQwenTTSLinePrompt(*project, lineCopy, seed)
-		if err != nil {
-			_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":     audioCloneLineStatusFailed,
-				"last_error": err.Error(),
-				"seed":       seed,
-				"updated_at": time.Now(),
-			}).Error
-			continue
+		// For RunningHub, let the background worker run the (minutes-long) job via an
+		// empty promptID instead of blocking this HTTP request. Local pre-queues here.
+		var promptID, workflowLabel string
+		if getConfiguredAudioGenerationProvider() != AudioGenerationProviderRunningHub {
+			var err error
+			promptID, _, workflowLabel, err = queueQwenTTSLinePrompt(*project, lineCopy, seed)
+			if err != nil {
+				_ = db.DB.Model(&models.QwenTTSLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
+					"status":     audioCloneLineStatusFailed,
+					"last_error": err.Error(),
+					"seed":       seed,
+					"updated_at": time.Now(),
+				}).Error
+				continue
+			}
 		}
 		taskID, err := startQwenTTSLineTask(&lineCopy, project, seed, promptID, workflowLabel)
 		if err != nil {

@@ -225,24 +225,38 @@ func HandleRenderAudioProductionLineTask(t *models.Task) (interface{}, error) {
 		}
 		return nil, err
 	}
-	logComfyWorkflowPayload("音频生产 ComfyUI Payload", workflowLabel, workflowJSON)
-	promptID, err := QueueComfyPrompt(workflowJSON)
-	if err != nil {
-		if shouldApplyAudioProductionLineTaskResult(line.ID, t.ID) {
-			_ = db.DB.Model(&models.AudioProductionLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{
-				"status":          audioCloneLineStatusFailed,
-				"current_task_id": "",
-				"last_error":      err.Error(),
-				"updated_at":      time.Now(),
-			}).Error
+	logComfyWorkflowPayload("音频生产 Payload", workflowLabel, workflowJSON)
+
+	var webPath string
+	if getConfiguredAudioGenerationProvider() == AudioGenerationProviderRunningHub {
+		tmplPath := audioProductionCustomVoiceWorkflowPath
+		if project.Mode == audioProductionModeVoicePrompt {
+			tmplPath = audioProductionVoicePromptWorkflowPath
 		}
-		return nil, err
+		template, terr := loadStoreVisitWorkflowTemplate(tmplPath)
+		if terr != nil {
+			err = terr
+		} else {
+			saveDir := audioProductionGeneratedDir(project.Code)
+			fileBase := fmt.Sprintf("line_%02d_%d", line.SortOrder, line.ID)
+			webPath, err = runRunningHubAudioTask(filepath.Base(tmplPath), template, workflowJSON, saveDir, fileBase)
+			if err == nil {
+				workflowLabel += "（RunningHub）"
+				Log(LogLevelInfo, "音频生产已通过 RunningHub 生成", fmt.Sprintf("ProjectID: %d\nLineID: %d", project.ID, line.ID))
+				task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")
+			}
+		}
+	} else {
+		var promptID string
+		promptID, err = QueueComfyPrompt(workflowJSON)
+		if err == nil {
+			Log(LogLevelInfo, "音频生产任务已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nLineID: %d\nPromptID: %s\nWorkflow: %s", project.ID, line.ID, promptID, workflowLabel))
+			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
+			webPath, err = waitForAudioProductionOutput(promptID, project.Code, line, func() bool {
+				return shouldApplyAudioProductionLineTaskResult(line.ID, t.ID)
+			})
+		}
 	}
-	Log(LogLevelInfo, "音频生产任务已提交到 ComfyUI 队列", fmt.Sprintf("ProjectID: %d\nLineID: %d\nPromptID: %s\nWorkflow: %s", project.ID, line.ID, promptID, workflowLabel))
-	task.GlobalTaskManager.UpdateTaskProgress(t.ID, 40, "")
-	webPath, err := waitForAudioProductionOutput(promptID, project.Code, line, func() bool {
-		return shouldApplyAudioProductionLineTaskResult(line.ID, t.ID)
-	})
 	if err != nil {
 		if shouldApplyAudioProductionLineTaskResult(line.ID, t.ID) {
 			_ = db.DB.Model(&models.AudioProductionLine{}).Where("id = ?", line.ID).Updates(map[string]interface{}{

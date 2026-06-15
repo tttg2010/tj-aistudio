@@ -15,6 +15,7 @@ import (
 
 	"kt-ai-studio/internal/db"
 	"kt-ai-studio/internal/models"
+	"kt-ai-studio/internal/workflow"
 
 	volcvisual "github.com/volcengine/volc-sdk-golang/service/visual"
 )
@@ -68,9 +69,179 @@ func queueConfiguredVideoRender(videoID uint, projectID uint) error {
 	switch getConfiguredVideoGenerationProvider() {
 	case VideoGenerationProviderJimeng:
 		return queueJimengVideoRender(videoID, projectID)
+	case VideoGenerationProviderRunningHub:
+		return queueRunningHubVideoRender(videoID, projectID)
 	default:
 		return queueLTXVideoRender(videoID, projectID)
 	}
+}
+
+// queueRunningHubVideoRender renders a scene's video on RunningHub using the
+// configured default video workflow (image-to-video). Like the jimeng path it
+// bypasses the local segment/promptID machinery: it builds the workflow from the
+// scene's generated image + video prompt, submits to RunningHub, and polls to
+// completion in a goroutine. Segment-batch and transition flows remain local.
+func queueRunningHubVideoRender(videoID uint, projectID uint) error {
+	var video models.Video
+	if err := db.DB.First(&video, videoID).Error; err != nil {
+		return fmt.Errorf("video not found")
+	}
+	if err := ensureVideoSceneLoaded(&video, true); err != nil {
+		return err
+	}
+	var project models.Project
+	if err := db.DB.First(&project, projectID).Error; err != nil {
+		return fmt.Errorf("project not found")
+	}
+	if strings.TrimSpace(video.Scene.GeneratedImage) == "" {
+		return fmt.Errorf("scene has no generated image")
+	}
+
+	// Resolve the configured default video workflow file.
+	var setting models.SystemSettings
+	if err := db.DB.Where("key = ?", KeyDefaultVideoModel).First(&setting).Error; err != nil || strings.TrimSpace(setting.Value) == "" {
+		return fmt.Errorf("默认视频模型未设置（系统设置 → 默认视频模型）")
+	}
+	workflowName := strings.TrimSpace(setting.Value)
+	files, _ := filepath.Glob(filepath.Join("workflows", "*.json"))
+	targetFile := ""
+	for _, f := range files {
+		if meta, err := workflow.ParseWorkflow(f); err == nil && meta.WorkflowName == workflowName {
+			targetFile = f
+			break
+		}
+	}
+	if targetFile == "" {
+		return fmt.Errorf("workflow file for '%s' not found", workflowName)
+	}
+	meta, err := workflow.ParseWorkflow(targetFile)
+	if err != nil {
+		return err
+	}
+	label := workflowDisplayNameFromPath(targetFile)
+
+	data, err := os.ReadFile(targetFile)
+	if err != nil {
+		return err
+	}
+	var pristine map[string]interface{}
+	if err := json.Unmarshal(data, &pristine); err != nil {
+		return err
+	}
+	var wfJSON map[string]interface{}
+	if err := json.Unmarshal(data, &wfJSON); err != nil {
+		return err
+	}
+
+	prompt := strings.TrimSpace(video.VideoPrompt)
+	if prompt == "" {
+		prompt = strings.TrimSpace(video.Scene.VideoPrompt)
+	}
+	if prompt == "" {
+		return fmt.Errorf("video prompt is empty")
+	}
+	negative := buildSegmentNegativePrompt(video.NegativePrompt)
+	seed := getConfiguredGlobalSeed()
+	width, height := getConfiguredVideoSize()
+	duration := video.DurationSeconds
+	if duration <= 0 {
+		duration = video.Scene.DurationSeconds
+	}
+	fps := defaultSegmentFPS
+	length := convertRecommendedDurationToFrameCount(duration, fps, 0)
+
+	setInput := func(nodeID, key string, value interface{}) {
+		if nodeID == "" {
+			return
+		}
+		if node, ok := wfJSON[nodeID].(map[string]interface{}); ok {
+			if inputs, ok := node["inputs"].(map[string]interface{}); ok {
+				inputs[key] = value
+			}
+		}
+	}
+	setInput(meta.PositiveNodeID, meta.PositiveInputKey, prompt)
+	setInput(meta.NegativeNodeID, meta.NegativeInputKey, negative)
+	setInput(meta.SeedNodeID, meta.SeedInputKey, seed)
+	setInput(meta.WidthNodeID, meta.WidthInputKey, width)
+	setInput(meta.HeightNodeID, meta.HeightInputKey, height)
+	if fps > 0 {
+		setInput(meta.FPSNodeID, meta.FPSInputKey, fps)
+	}
+	if length > 0 {
+		setInput(meta.LengthNodeID, meta.LengthInputKey, length)
+	}
+	setStoreVisitPrimitiveIntByTitle(wfJSON, "Width", width)
+	setStoreVisitPrimitiveIntByTitle(wfJSON, "Height", height)
+	if fps > 0 {
+		setStoreVisitPrimitiveIntByTitle(wfJSON, "Frame Rate", fps)
+	}
+	if length > 0 {
+		setStoreVisitPrimitiveIntByTitle(wfJSON, "Length", length)
+	}
+
+	// First-frame image → RunningHub.
+	imageNodeID := ""
+	for id, node := range wfJSON {
+		if nm, ok := node.(map[string]interface{}); ok {
+			if ct, _ := nm["class_type"].(string); ct == "LoadImage" {
+				imageNodeID = id
+				break
+			}
+		}
+	}
+	absImg, err := assetWebPathToAbs(video.Scene.GeneratedImage)
+	if err != nil {
+		return err
+	}
+	uploaded, err := runningHubUploadImage(absImg)
+	if err != nil {
+		return err
+	}
+	if imageNodeID != "" {
+		setInput(imageNodeID, "image", uploaded)
+	}
+
+	if err := removeGeneratedVideoAsset(video.GeneratedVideo); err != nil {
+		return err
+	}
+	video.GeneratedVideo = ""
+	video.PositivePrompt = prompt
+	video.NegativePrompt = negative
+	video.GeneratedWorkflow = label + "（RunningHub）"
+	video.Width = width
+	video.Height = height
+	video.Status = "generating"
+	video.UpdatedAt = time.Now()
+	if err := db.DB.Save(&video).Error; err != nil {
+		return err
+	}
+	BroadcastUpdate("video", video.ID)
+	Log(LogLevelInfo, "RunningHub 短剧视频任务已提交", fmt.Sprintf("video=%d project=%d workflow=%s", video.ID, project.ID, label))
+
+	go func(videoID uint, projectCode string, templateFile string, pristine, injected map[string]interface{}) {
+		saveDir := filepath.Join("output", projectCode, "videos")
+		fileBase := fmt.Sprintf("video_%d", videoID)
+		webPath, err := runRunningHubVideoTask(filepath.Base(templateFile), pristine, injected, saveDir, fileBase)
+		if err != nil {
+			Log(LogLevelError, "RunningHub 短剧视频生成失败", fmt.Sprintf("video=%d err=%v", videoID, err))
+			_ = db.DB.Model(&models.Video{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+				"status":     "failed",
+				"updated_at": time.Now(),
+			}).Error
+			BroadcastUpdate("video", videoID)
+			return
+		}
+		_ = db.DB.Model(&models.Video{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+			"generated_video": webPath,
+			"status":          "generated",
+			"updated_at":      time.Now(),
+		}).Error
+		BroadcastUpdate("video", videoID)
+		Log(LogLevelInfo, "RunningHub 短剧视频生成完成", fmt.Sprintf("video=%d file=%s", videoID, webPath))
+	}(video.ID, project.Code, targetFile, pristine, wfJSON)
+
+	return nil
 }
 
 func newJimengVisualClient() (*volcvisual.Visual, error) {

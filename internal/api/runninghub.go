@@ -227,9 +227,21 @@ func runningHubFetchOutputs(taskID string) ([]RHOutput, error) {
 	return outputs, nil
 }
 
-// runningHubUploadImage uploads a local file to RunningHub and returns the
-// platform file name to use as a LoadImage node value. Mirrors UploadToComfyUIInput.
+// runningHubUploadImage uploads a local image to RunningHub for a LoadImage node.
 func runningHubUploadImage(localPath string) (string, error) {
+	return runningHubUploadFile(localPath, "image")
+}
+
+// runningHubUploadAudio uploads a local audio file to RunningHub for a
+// LoadAudio / reference-audio node.
+func runningHubUploadAudio(localPath string) (string, error) {
+	return runningHubUploadFile(localPath, "audio")
+}
+
+// runningHubUploadFile uploads a local file (fileType: image/audio/video) to
+// RunningHub and returns the platform file name to inject into a loader node.
+// Mirrors UploadToComfyUIInput.
+func runningHubUploadFile(localPath string, fileType string) (string, error) {
 	cfg := getRunningHubConfig()
 	if cfg.APIKey == "" {
 		return "", fmt.Errorf("RunningHub API Key 未配置")
@@ -244,7 +256,7 @@ func runningHubUploadImage(localPath string) (string, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	_ = writer.WriteField("apiKey", cfg.APIKey)
-	_ = writer.WriteField("fileType", "image")
+	_ = writer.WriteField("fileType", fileType)
 	part, err := writer.CreateFormFile("file", filepath.Base(localPath))
 	if err != nil {
 		return "", err
@@ -518,6 +530,70 @@ func runRunningHubVideoTask(templateFileName string, template, injected map[stri
 		return "", err
 	}
 	return "/" + filepath.ToSlash(savePath), nil
+}
+
+// runRunningHubAudioTask runs the published audio/TTS workflow mapped to
+// templateFileName on RunningHub and downloads the first audio output into
+// saveDir, returning its local web path ("/output/...").
+func runRunningHubAudioTask(templateFileName string, template, injected map[string]interface{}, saveDir, fileBase string) (string, error) {
+	workflowID := lookupRunningHubWorkflowID(templateFileName)
+	if workflowID == "" {
+		return "", fmt.Errorf("workflow「%s」未在设置里映射 RunningHub workflowId", templateFileName)
+	}
+	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
+
+	taskID, err := runningHubCreateTask(workflowID, nodeInfoList)
+	if err != nil {
+		return "", err
+	}
+	Log(LogLevelInfo, "RunningHub 音频任务已创建", fmt.Sprintf("workflowId=%s taskId=%s 覆盖节点数=%d", workflowID, taskID, len(nodeInfoList)))
+
+	outputs, err := runningHubWaitForOutputs(taskID, 3*time.Second, 10*time.Minute)
+	if err != nil {
+		return "", err
+	}
+	output := pickRunningHubAudioOutput(outputs)
+	if strings.TrimSpace(output.FileURL) == "" {
+		return "", fmt.Errorf("RunningHub 任务完成但未返回音频输出")
+	}
+
+	if err := os.MkdirAll(saveDir, 0755); err != nil {
+		return "", err
+	}
+	ext := strings.ToLower(filepath.Ext(output.FileURL))
+	if ext == "" || len(ext) > 5 {
+		if output.FileType != "" {
+			ext = "." + strings.TrimPrefix(strings.ToLower(output.FileType), ".")
+		} else {
+			ext = ".mp3"
+		}
+	}
+	savePath := filepath.Join(saveDir, fmt.Sprintf("%s_%d%s", fileBase, time.Now().UnixNano(), ext))
+	if err := downloadRemoteAsset(output.FileURL, savePath); err != nil {
+		return "", err
+	}
+	return "/" + filepath.ToSlash(savePath), nil
+}
+
+// pickRunningHubAudioOutput returns the first audio-like output (by fileType or
+// URL extension), falling back to the first output of any kind.
+func pickRunningHubAudioOutput(outputs []RHOutput) RHOutput {
+	for _, o := range outputs {
+		switch strings.ToLower(strings.TrimPrefix(o.FileType, ".")) {
+		case "mp3", "wav", "flac", "aac", "ogg", "m4a", "opus":
+			return o
+		}
+		u := strings.ToLower(o.FileURL)
+		if strings.HasSuffix(u, ".mp3") || strings.HasSuffix(u, ".wav") ||
+			strings.HasSuffix(u, ".flac") || strings.HasSuffix(u, ".m4a") ||
+			strings.HasSuffix(u, ".ogg") {
+			return o
+		}
+	}
+	if len(outputs) > 0 {
+		return outputs[0]
+	}
+	return RHOutput{}
 }
 
 // pickRunningHubVideoOutput returns the first video-like output (by fileType or
