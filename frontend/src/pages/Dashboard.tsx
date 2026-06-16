@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { Activity, Server, Zap, HardDrive, Cpu, Network, CheckCircle2, XCircle, Clock, Loader2, Trash2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -512,16 +513,16 @@ export default function Dashboard() {
                                   </div>
                               )}
                               {/* Remove real-time view button from Dashboard as requested */}
-                              <span className={`text-xs px-2 py-1 rounded-full border ${
-                                  task.status === "completed" ? "bg-green-500/10 text-green-500 border-green-500/20" :
-                                  task.status === "failed" ? "bg-red-500/10 text-red-500 border-red-500/20" :
-                                  task.status === "running" ? "bg-blue-500/10 text-blue-500 border-blue-500/20" :
-                                  "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
-                              }`}>
+                              <Badge variant={
+                                  task.status === "completed" ? "success" :
+                                  task.status === "failed" ? "destructive" :
+                                  task.status === "running" ? "info" :
+                                  "warning"
+                              }>
                                   {task.status === "completed" ? "已完成" :
                                    task.status === "failed" ? "失败" :
                                    task.status === "running" ? "进行中" : "等待中"}
-                              </span>
+                              </Badge>
                           </div>
                       </div>
                   ))}

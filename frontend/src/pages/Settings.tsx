@@ -3,6 +3,7 @@ import axios from "axios";
 import type { Workflow } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Combobox } from "@/components/ui/combobox";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Save, CheckCircle2, XCircle, ExternalLink, FolderSearch } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -196,24 +197,28 @@ export default function Settings() {
             </div>
             
             {/* LLM 设置 */}
-            <div className="bg-card p-6 rounded-lg border border-border shadow-sm">
-                <h2 className="text-xl font-semibold mb-4 text-primary">LLM 设置</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-sm font-medium mb-2">LLM 请求超时（分钟）</label>
-                        <Input
-                            type="number"
-                            min="1"
-                            value={settings.llm_timeout_minutes}
-                            onChange={e => updateSetting("llm_timeout_minutes", e.target.value)}
-                            placeholder="30"
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">
-                            自动剧情请求 LLM 时的最长等待时间。适合长文本、慢模型或拥堵时增大。
-                        </p>
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-xl text-primary">LLM 设置</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className="block text-sm font-medium mb-2">LLM 请求超时（分钟）</label>
+                            <Input
+                                type="number"
+                                min="1"
+                                value={settings.llm_timeout_minutes}
+                                onChange={e => updateSetting("llm_timeout_minutes", e.target.value)}
+                                placeholder="30"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                自动剧情请求 LLM 时的最长等待时间。适合长文本、慢模型或拥堵时增大。
+                            </p>
+                        </div>
                     </div>
-                </div>
-            </div>
+                </CardContent>
+            </Card>
 
             <div className="bg-card p-6 rounded-lg border border-border shadow-sm">
                 <h2 className="text-xl font-semibold mb-4 text-primary">综合讲解转场</h2>

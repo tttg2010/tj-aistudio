@@ -30,6 +30,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox } from "@/components/ui/combobox";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -2490,38 +2492,18 @@ export default function ProjectDetail() {
         <div className="flex-1 space-y-6">
           {/* Tabs */}
           <div className="flex border-b border-border justify-between items-center">
-            <div className="flex">
-              <button
-                onClick={() => setActiveTab("characters")}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === "characters"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                角色预览
-              </button>
-              <button
-                onClick={() => setActiveTab("scenes")}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === "scenes"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                场景列表
-              </button>
-              <button
-                onClick={() => setActiveTab("videos")}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === "videos"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                视频列表
-              </button>
-            </div>
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) =>
+                setActiveTab(v as "characters" | "scenes" | "videos")
+              }
+            >
+              <TabsList>
+                <TabsTrigger value="characters">角色预览</TabsTrigger>
+                <TabsTrigger value="scenes">场景列表</TabsTrigger>
+                <TabsTrigger value="videos">视频列表</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <div className="pr-2 pb-2 flex items-center gap-2">
               {activeTab === "characters" && (
                 <>
@@ -2627,11 +2609,15 @@ export default function ProjectDetail() {
                         <div className="flex justify-between items-start">
                           <div className="flex items-center gap-3">
                             <h3 className="font-bold text-lg">{char.name}</h3>
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full ${char.status === "generated" ? "bg-green-500/10 text-green-500" : "bg-yellow-500/10 text-yellow-500"}`}
+                            <Badge
+                              variant={
+                                char.status === "generated"
+                                  ? "success"
+                                  : "warning"
+                              }
                             >
                               {char.status === "generated" ? "已生成" : "草稿"}
-                            </span>
+                            </Badge>
                             {char.status === "generated" &&
                               resolveGeneratedWorkflowLabel(
                                 char.generated_workflow,
@@ -2643,9 +2629,7 @@ export default function ProjectDetail() {
                                 </span>
                               )}
                             {char.is_locked && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600">
-                                已锁定
-                              </span>
+                              <Badge variant="warning">已锁定</Badge>
                             )}
                           </div>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
@@ -2801,13 +2785,17 @@ export default function ProjectDetail() {
                                           约 {scene.duration_seconds} 秒
                                         </span>
                                       ) : null}
-                                      <span
-                                        className={`text-xs px-2 py-0.5 rounded-full ${scene.status === "generated" ? "bg-green-500/10 text-green-500" : "bg-yellow-500/10 text-yellow-500"}`}
+                                      <Badge
+                                        variant={
+                                          scene.status === "generated"
+                                            ? "success"
+                                            : "warning"
+                                        }
                                       >
                                         {scene.status === "generated"
                                           ? "已生成"
                                           : "草稿"}
-                                      </span>
+                                      </Badge>
                                       {scene.status === "generated" &&
                                         resolveGeneratedWorkflowLabel(
                                           scene.generated_workflow,
@@ -3120,16 +3108,16 @@ export default function ProjectDetail() {
                                           秒)
                                         </span>
                                       </h3>
-                                      <span
-                                        className={`text-xs px-2 py-0.5 rounded-full ${
+                                      <Badge
+                                        variant={
                                           video.status === "generated"
-                                            ? "bg-green-500/10 text-green-500"
+                                            ? "success"
                                             : video.status === "generating"
-                                              ? "bg-blue-500/10 text-blue-500"
+                                              ? "info"
                                               : video.status === "failed"
-                                                ? "bg-red-500/10 text-red-500"
-                                                : "bg-yellow-500/10 text-yellow-500"
-                                        }`}
+                                                ? "destructive"
+                                                : "warning"
+                                        }
                                       >
                                         {video.status === "generated"
                                           ? "已生成"
@@ -3138,7 +3126,7 @@ export default function ProjectDetail() {
                                             : video.status === "failed"
                                               ? "失败"
                                               : "待处理"}
-                                      </span>
+                                      </Badge>
                                       {video.status === "generated" &&
                                         resolveGeneratedWorkflowLabel(
                                           video.generated_workflow,
