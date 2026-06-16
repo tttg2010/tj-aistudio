@@ -179,19 +179,20 @@ func buildGeneralGuideVideoWorkflow(scene models.GeneralGuideScene, project mode
 		return nil, "", err
 	}
 
-	var imageNodeID string
+	// i2v workflows have one LoadImage; flf2v workflows have two (start + end).
+	// We only have a first frame, so set every LoadImage node to it.
+	imageNodeFound := false
 	for id, node := range workflowJSON {
 		if nodeMap, ok := node.(map[string]interface{}); ok {
 			if classType, ok := nodeMap["class_type"].(string); ok && classType == "LoadImage" {
-				imageNodeID = id
-				break
+				setInput(id, "image", uploadedName)
+				imageNodeFound = true
 			}
 		}
 	}
-	if imageNodeID == "" {
+	if !imageNodeFound {
 		return nil, "", fmt.Errorf("video workflow missing LoadImage node")
 	}
-	setInput(imageNodeID, "image", uploadedName)
 
 	for _, node := range workflowJSON {
 		nodeMap, ok := node.(map[string]interface{})

@@ -22,7 +22,7 @@ import (
 
 const (
 	storeVisitImageWorkflowPath          = "workflows/b_qwen_Image_edit_subgraphed.json"
-	storeVisitVideoWorkflowPath          = "workflows/video_new_ltx2_3_i2v.json"
+	storeVisitVideoWorkflowPath          = "workflows/video_wan2_2_14B_flf2v.json"
 	storeVisitOutputRoot                 = "output/store_visit"
 	storeVisitDefaultVideoFPS            = 25
 	storeVisitDefaultVideoDurationSecond = 10
@@ -1671,16 +1671,17 @@ func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.Sto
 	frameCount := storeVisitDefaultVideoFPS*duration + 1
 	setStoreVisitPrimitiveIntByTitle(workflowJSON, "Length", frameCount)
 
-	var imageNodeID string
+	// Collect all LoadImage nodes. i2v workflows have one; first-last-frame (flf2v)
+	// workflows have two (start + end) — we only have one frame, so set both to it.
+	imageNodeIDs := make([]string, 0, 2)
 	for id, node := range workflowJSON {
 		if nodeMap, ok := node.(map[string]interface{}); ok {
 			if classType, ok := nodeMap["class_type"].(string); ok && classType == "LoadImage" {
-				imageNodeID = id
-				break
+				imageNodeIDs = append(imageNodeIDs, id)
 			}
 		}
 	}
-	if imageNodeID == "" {
+	if len(imageNodeIDs) == 0 {
 		return nil, "", fmt.Errorf("video workflow missing LoadImage node")
 	}
 	imageAbsPath, err := assetWebPathToAbs(spot.GeneratedImage)
@@ -1693,10 +1694,12 @@ func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.Sto
 	} else {
 		uploadedName, err = UploadToComfyUIInput(imageAbsPath)
 	}
+	frameValue := uploadedName
 	if err != nil {
-		setInput(imageNodeID, "image", imageAbsPath)
-	} else {
-		setInput(imageNodeID, "image", uploadedName)
+		frameValue = imageAbsPath
+	}
+	for _, id := range imageNodeIDs {
+		setInput(id, "image", frameValue)
 	}
 
 	for _, node := range workflowJSON {
