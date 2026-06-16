@@ -203,13 +203,46 @@ func runningHubFetchFailedReason(taskID string) string {
 	raw, _ := io.ReadAll(resp.Body)
 	var env struct {
 		Data struct {
-			FailedReason string `json:"failedReason"`
+			// failedReason is sometimes a bare string ("433||{...}") and sometimes
+			// an object ({exception_message, node_id, ...}); accept both.
+			FailedReason json.RawMessage `json:"failedReason"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(raw, &env) == nil {
-		return strings.TrimSpace(env.Data.FailedReason)
+	if json.Unmarshal(raw, &env) != nil || len(env.Data.FailedReason) == 0 {
+		return ""
 	}
-	return ""
+	fr := env.Data.FailedReason
+
+	// String form.
+	var s string
+	if json.Unmarshal(fr, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	// Object form — pull out the human-useful fields into one line.
+	var obj struct {
+		ExceptionType    string `json:"exception_type"`
+		ExceptionMessage string `json:"exception_message"`
+		NodeID           string `json:"node_id"`
+		NodeName         string `json:"node_name"`
+		Traceback        string `json:"traceback"`
+	}
+	if json.Unmarshal(fr, &obj) == nil {
+		parts := make([]string, 0, 4)
+		if strings.TrimSpace(obj.NodeName) != "" || strings.TrimSpace(obj.NodeID) != "" {
+			parts = append(parts, fmt.Sprintf("节点 %s(%s)", strings.TrimSpace(obj.NodeName), strings.TrimSpace(obj.NodeID)))
+		}
+		if strings.TrimSpace(obj.ExceptionMessage) != "" {
+			parts = append(parts, strings.TrimSpace(obj.ExceptionMessage))
+		}
+		if strings.TrimSpace(obj.Traceback) != "" {
+			parts = append(parts, strings.TrimSpace(obj.Traceback))
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " | ")
+		}
+	}
+	// Fallback: raw JSON.
+	return strings.TrimSpace(string(fr))
 }
 
 // runningHubQueryStatus returns the task status string (QUEUED/RUNNING/SUCCESS/FAILED).
@@ -473,8 +506,10 @@ func runningHubWaitForOutputs(taskID string, pollInterval time.Duration, timeout
 			return runningHubFetchOutputs(taskID)
 		case runningHubStatusFailed:
 			if reason := runningHubFetchFailedReason(taskID); reason != "" {
+				Log(LogLevelError, "RunningHub 任务失败", fmt.Sprintf("taskId=%s\n原因: %s", taskID, reason))
 				return nil, fmt.Errorf("RunningHub 任务失败 (task=%s): %s", taskID, reason)
 			}
+			Log(LogLevelError, "RunningHub 任务失败", fmt.Sprintf("taskId=%s（RunningHub 未返回失败详情）", taskID))
 			return nil, fmt.Errorf("RunningHub 任务失败 (task=%s)", taskID)
 		default:
 			// QUEUED / RUNNING / other transient states.

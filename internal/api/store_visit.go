@@ -22,7 +22,8 @@ import (
 
 const (
 	storeVisitImageWorkflowPath          = "workflows/b_qwen_Image_edit_subgraphed.json"
-	storeVisitVideoWorkflowPath          = "workflows/video_wan2_2_14B_flf2v.json"
+	storeVisitVideoWorkflowPath          = "workflows/video_new_ltx2_3_i2v.json"
+	storeVisitVideoWorkflowPathRunningHub = "workflows/video_wan2_2_14B_flf2v.json"
 	storeVisitOutputRoot                 = "output/store_visit"
 	storeVisitDefaultVideoFPS            = 25
 	storeVisitDefaultVideoDurationSecond = 10
@@ -1617,8 +1618,21 @@ func buildStoreVisitImageWorkflow(template map[string]interface{}, bloggerImageN
 	return workflowJSON, nil
 }
 
+// videoWorkflowFileForProvider returns the i2v workflow used for store-visit /
+// general-guide video. Local ComfyUI keeps the higher-quality LTX workflow; for
+// RunningHub it uses WAN 2.2 (flf2v) because RunningHub does not host LTX's gemma
+// text-encoder / ltx-2.3 models. WAN flf2v's two LoadImage nodes are both fed the
+// single first frame by the builders (first=last).
+func videoWorkflowFileForProvider() string {
+	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
+		return storeVisitVideoWorkflowPathRunningHub
+	}
+	return storeVisitVideoWorkflowPath
+}
+
 func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.StoreVisitProject, seed int64) (map[string]interface{}, string, error) {
-	data, err := os.ReadFile(storeVisitVideoWorkflowPath)
+	videoWorkflowPath := videoWorkflowFileForProvider()
+	data, err := os.ReadFile(videoWorkflowPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1627,11 +1641,11 @@ func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.Sto
 		return nil, "", err
 	}
 
-	meta, err := workflow.ParseWorkflow(storeVisitVideoWorkflowPath)
+	meta, err := workflow.ParseWorkflow(videoWorkflowPath)
 	if err != nil {
 		return nil, "", err
 	}
-	workflowLabel := workflowDisplayNameFromPath(storeVisitVideoWorkflowPath)
+	workflowLabel := workflowDisplayNameFromPath(videoWorkflowPath)
 	setInput := func(nodeID string, key string, value interface{}) {
 		if strings.TrimSpace(nodeID) == "" {
 			return
@@ -1997,13 +2011,14 @@ func HandleRenderStoreVisitSpotVideoTask(t *models.Task) (interface{}, error) {
 
 	var webPath string
 	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
-		template, terr := loadStoreVisitWorkflowTemplate(storeVisitVideoWorkflowPath)
+		videoWorkflowPath := videoWorkflowFileForProvider()
+		template, terr := loadStoreVisitWorkflowTemplate(videoWorkflowPath)
 		if terr != nil {
 			err = terr
 		} else {
 			saveDir := storeVisitVideosDir(project.Code)
 			fileBase := fmt.Sprintf("%s_%d", spotKey, spot.ID)
-			webPath, err = runRunningHubVideoTask(filepath.Base(storeVisitVideoWorkflowPath), template, workflowJSON, saveDir, fileBase)
+			webPath, err = runRunningHubVideoTask(filepath.Base(videoWorkflowPath), template, workflowJSON, saveDir, fileBase)
 			if err == nil {
 				Log(LogLevelInfo, fmt.Sprintf("博主探店%s视频已通过 RunningHub 生成", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d", project.ID, spot.ID))
 				task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")

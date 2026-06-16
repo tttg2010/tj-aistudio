@@ -829,8 +829,9 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 	videoProvider := getConfiguredVideoGenerationProvider()
 	rhGenerated := 0
 	var rhVideoTemplate map[string]interface{}
+	videoWorkflowPath := videoWorkflowFileForProvider()
 	if videoProvider == VideoGenerationProviderRunningHub {
-		tmpl, terr := loadStoreVisitWorkflowTemplate(storeVisitVideoWorkflowPath)
+		tmpl, terr := loadStoreVisitWorkflowTemplate(videoWorkflowPath)
 		if terr != nil {
 			return nil, terr
 		}
@@ -879,7 +880,7 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 		if videoProvider == VideoGenerationProviderRunningHub {
 			saveDir := storeVisitVideosDir(project.Code)
 			fileBase := fmt.Sprintf("%s_%d", getStoreVisitSpotFileKey(spot), spot.ID)
-			webPath, rhErr := runRunningHubVideoTask(filepath.Base(storeVisitVideoWorkflowPath), rhVideoTemplate, workflowJSON, saveDir, fileBase)
+			webPath, rhErr := runRunningHubVideoTask(filepath.Base(videoWorkflowPath), rhVideoTemplate, workflowJSON, saveDir, fileBase)
 			if rhErr != nil || strings.TrimSpace(webPath) == "" {
 				msg := "未获取到视频输出"
 				if rhErr != nil {

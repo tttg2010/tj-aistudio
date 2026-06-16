@@ -108,7 +108,8 @@ func buildGeneralGuideImageWorkflow(template map[string]interface{}, sceneImageN
 }
 
 func buildGeneralGuideVideoWorkflow(scene models.GeneralGuideScene, project models.GeneralGuideProject, seed int64) (map[string]interface{}, string, error) {
-	data, err := os.ReadFile(storeVisitVideoWorkflowPath)
+	videoWorkflowPath := videoWorkflowFileForProvider()
+	data, err := os.ReadFile(videoWorkflowPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -117,11 +118,11 @@ func buildGeneralGuideVideoWorkflow(scene models.GeneralGuideScene, project mode
 		return nil, "", err
 	}
 
-	meta, err := workflow.ParseWorkflow(storeVisitVideoWorkflowPath)
+	meta, err := workflow.ParseWorkflow(videoWorkflowPath)
 	if err != nil {
 		return nil, "", err
 	}
-	workflowLabel := workflowDisplayNameFromPath(storeVisitVideoWorkflowPath)
+	workflowLabel := workflowDisplayNameFromPath(videoWorkflowPath)
 	setInput := func(nodeID string, key string, value interface{}) {
 		if strings.TrimSpace(nodeID) == "" {
 			return
@@ -743,13 +744,14 @@ func HandleRenderGeneralGuideSceneVideoTask(t *models.Task) (interface{}, error)
 
 	var webPath string
 	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
-		template, terr := loadStoreVisitWorkflowTemplate(storeVisitVideoWorkflowPath)
+		videoWorkflowPath := videoWorkflowFileForProvider()
+		template, terr := loadStoreVisitWorkflowTemplate(videoWorkflowPath)
 		if terr != nil {
 			err = terr
 		} else {
 			saveDir := generalGuideVideosDir(project.Code)
 			fileBase := fmt.Sprintf("%s_%d", sceneKey, scene.ID)
-			webPath, err = runRunningHubVideoTask(filepath.Base(storeVisitVideoWorkflowPath), template, workflowJSON, saveDir, fileBase)
+			webPath, err = runRunningHubVideoTask(filepath.Base(videoWorkflowPath), template, workflowJSON, saveDir, fileBase)
 			if err == nil {
 				workflowLabel += "（RunningHub）"
 				Log(LogLevelInfo, "综合讲解视频已通过 RunningHub 生成", fmt.Sprintf("ProjectID: %d\nSceneID: %d", project.ID, scene.ID))
