@@ -3,6 +3,7 @@ package task
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ type TaskManager struct {
 	llmWorker    chan *models.Task
 	renderWorker chan *models.Task
 	audioWorker  chan *models.Task
+	rhWorker     chan *models.Task
 	handlers     map[string]func(*models.Task) (interface{}, error)
 }
 
@@ -31,7 +33,39 @@ const (
 	defaultLLMWorkerConcurrency = 2
 	defaultRenderConcurrency    = 12
 	defaultAudioConcurrency     = 32
+	// RunningHub generation runs in its own isolated pool so its single-task
+	// concurrency limit (rhGate) can't starve the local render/audio pools. The
+	// actual RunningHub concurrency is enforced by rhGate; these are just enough
+	// workers to dequeue and (mostly) wait without blocking local work.
+	defaultRunningHubWorkerConcurrency = 4
 )
+
+// rhRoutedTaskProvider maps the RunningHub-wired generation task types to the
+// provider setting that governs them. When that provider is "runninghub" the
+// task is routed to the isolated rhWorker pool.
+var rhRoutedTaskProvider = map[string]string{
+	"render_store_visit_spot_image":             "image_generation_provider",
+	"batch_generate_store_visit_project_images": "image_generation_provider",
+	"render_general_guide_scene_image":          "image_generation_provider",
+	"render_store_visit_spot_video":             "video_generation_provider",
+	"batch_generate_store_visit_project_videos": "video_generation_provider",
+	"render_general_guide_scene_video":          "video_generation_provider",
+	"render_qwen_tts_line":                      "audio_generation_provider",
+	"render_audio_clone_line":                   "audio_generation_provider",
+	"render_audio_production_line":              "audio_generation_provider",
+}
+
+func runningHubRoutedTask(taskType string) bool {
+	key, ok := rhRoutedTaskProvider[taskType]
+	if !ok {
+		return false
+	}
+	var s models.SystemSettings
+	if err := db.DB.Where("key = ?", key).First(&s).Error; err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(s.Value), "runninghub")
+}
 
 // InitTaskManager initializes the global task manager
 func InitTaskManager() {
@@ -41,6 +75,7 @@ func InitTaskManager() {
 		llmWorker:    make(chan *models.Task, 100),
 		renderWorker: make(chan *models.Task, 100),
 		audioWorker:  make(chan *models.Task, 200),
+		rhWorker:     make(chan *models.Task, 300),
 		handlers:     make(map[string]func(*models.Task) (interface{}, error)),
 	}
 
@@ -56,6 +91,9 @@ func InitTaskManager() {
 	}
 	for i := 0; i < defaultAudioConcurrency; i++ {
 		go GlobalTaskManager.processQueue(GlobalTaskManager.audioWorker)
+	}
+	for i := 0; i < defaultRunningHubWorkerConcurrency; i++ {
+		go GlobalTaskManager.processQueue(GlobalTaskManager.rhWorker)
 	}
 }
 
@@ -75,6 +113,7 @@ loop:
 		case <-tm.llmWorker:
 		case <-tm.renderWorker:
 		case <-tm.audioWorker:
+		case <-tm.rhWorker:
 		default:
 			break loop
 		}
@@ -119,9 +158,12 @@ func (tm *TaskManager) AddTask(taskType string, payload interface{}) (*models.Ta
 	tm.tasks[task.ID] = task
 	tm.mu.Unlock()
 
-	// Push to channel
+	// Push to channel. RunningHub-routed generation goes to its own isolated pool
+	// so its serialized concurrency can't starve the local render/audio workers.
 	fmt.Printf("Task queued: %s (%s)\n", task.ID, task.Type)
-	if isAudioTaskType(task.Type) {
+	if runningHubRoutedTask(task.Type) {
+		tm.rhWorker <- task
+	} else if isAudioTaskType(task.Type) {
 		tm.audioWorker <- task
 	} else if isRenderTaskType(task.Type) {
 		tm.renderWorker <- task
