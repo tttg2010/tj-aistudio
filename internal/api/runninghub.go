@@ -265,39 +265,53 @@ func runningHubUploadFile(localPath string, fileType string) (string, error) {
 		return "", err
 	}
 	writer.Close()
+	bodyBytes := body.Bytes()
+	contentType := writer.FormDataContentType()
 
-	req, err := http.NewRequest(http.MethodPost, cfg.BaseURL+"/task/openapi/upload", body)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Host", "www.runninghub.cn")
+	// Upload over a possibly-flaky link to RunningHub; retry transient network
+	// errors (EOF / connection reset) and 5xx with linear backoff.
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		req, err := http.NewRequest(http.MethodPost, cfg.BaseURL+"/task/openapi/upload", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("Host", "www.runninghub.cn")
 
-	resp, err := runningHubHTTPClient(60 * time.Second).Do(req)
-	if err != nil {
-		return "", fmt.Errorf("RunningHub 上传失败: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := runningHubHTTPClient(120 * time.Second).Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("RunningHub 上传失败: %w", err)
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = fmt.Errorf("RunningHub 上传返回 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+			if resp.StatusCode >= 500 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
+			}
+			return "", lastErr
+		}
 
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("RunningHub 上传返回 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		var env runningHubEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return "", fmt.Errorf("无法解析 RunningHub 上传响应: %w (body=%s)", err, strings.TrimSpace(string(raw)))
+		}
+		if env.Code != 0 {
+			return "", fmt.Errorf("RunningHub 上传错误 code=%d msg=%s", env.Code, strings.TrimSpace(env.Msg))
+		}
+		var data struct {
+			FileName string `json:"fileName"`
+		}
+		if err := json.Unmarshal(env.Data, &data); err != nil || strings.TrimSpace(data.FileName) == "" {
+			return "", fmt.Errorf("RunningHub 上传未返回 fileName: %s", strings.TrimSpace(string(env.Data)))
+		}
+		return strings.TrimSpace(data.FileName), nil
 	}
-
-	var env runningHubEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return "", fmt.Errorf("无法解析 RunningHub 上传响应: %w (body=%s)", err, strings.TrimSpace(string(raw)))
-	}
-	if env.Code != 0 {
-		return "", fmt.Errorf("RunningHub 上传错误 code=%d msg=%s", env.Code, strings.TrimSpace(env.Msg))
-	}
-	var data struct {
-		FileName string `json:"fileName"`
-	}
-	if err := json.Unmarshal(env.Data, &data); err != nil || strings.TrimSpace(data.FileName) == "" {
-		return "", fmt.Errorf("RunningHub 上传未返回 fileName: %s", strings.TrimSpace(string(env.Data)))
-	}
-	return strings.TrimSpace(data.FileName), nil
+	return "", fmt.Errorf("RunningHub 上传失败（已重试 3 次）: %w", lastErr)
 }
 
 // uploadReferenceImageForProvider uploads a local reference image to the active
