@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, CheckCircle2, ChevronDown, Clapperboard, FolderInput, GitBranch, ImagePlus, Loader2, Megaphone, RefreshCw, Save, Scissors, Sparkles, Tags, UploadCloud, UserRound, Video } from "lucide-react";
 import { toast } from "sonner";
+import WorkflowBadge from "@/components/WorkflowBadge";
 
 import type { GeneralGuideProject, GeneralGuideReference, GeneralGuideScene, GeneralGuideTag, GeneralGuideTransition, GeneralGuideTransitionPresetListResponse, GeneralGuideTransitionPresetOption, LLMStreamState } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1226,6 +1227,10 @@ export default function GeneralGuideProjectDetail() {
           </button>
           <div className="space-y-1">
             <h1 className="text-3xl font-bold">{projectName || "综合讲解"}</h1>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <WorkflowBadge section="general_guide" media="image" />
+              <WorkflowBadge section="general_guide" media="video" />
+            </div>
             <p className="text-sm text-muted-foreground">
               用尽可能少的项目总文案，自动规划讲解场景，再按每行要求上传对应图片即可。
             </p>

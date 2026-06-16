@@ -365,6 +365,9 @@ func main() {
 		// RunningHub Routes
 		apiGroup.GET("/runninghub/status", api.GetRunningHubStatus)
 
+		// Active workflow resolution (debug aid: which workflow each generate action uses)
+		apiGroup.GET("/active-workflows", api.GetActiveWorkflows)
+
 		// System Routes
 		apiGroup.GET("/system/info", api.GetSystemInfo)
 		apiGroup.GET("/system/monitor", api.GetSystemMonitor)

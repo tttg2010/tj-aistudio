@@ -6,6 +6,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Save, CheckCircle2, XCircle, ExternalLink, FolderSearch } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { refreshWorkflowBadges } from "@/components/WorkflowBadge";
 
 interface ModelCheckResult {
     file_name: string;
@@ -107,6 +108,7 @@ export default function Settings() {
     const handleSave = () => {
         axios.put("/api/settings", settings)
             .then(() => {
+                refreshWorkflowBadges();
                 toast.success("系统设置已保存");
             })
             .catch(err => {

@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
+import WorkflowBadge from "@/components/WorkflowBadge";
 import {
   ArrowLeft,
   Users,
@@ -2411,6 +2412,10 @@ export default function ProjectDetail() {
                 {project.code}
               </span>
             </h1>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <WorkflowBadge section="short_drama" media="image" />
+              <WorkflowBadge section="short_drama" media="video" />
+            </div>
             <p className="text-sm text-muted-foreground mt-1">
               画风:{" "}
               <span className="text-purple-500">{project.art_style?.name}</span>

@@ -60,6 +60,22 @@ interface Task {
   updated_at: string;
 }
 
+// Extract a previewable image/video from a task's result JSON (handlers store
+// e.g. {"generated_image":"/output/..."} or {"generated_video":"/output/..."}).
+function getTaskMedia(result: string): { type: "image" | "video"; url: string } | null {
+  if (!result) return null;
+  try {
+    const r = JSON.parse(result);
+    const vid = r.generated_video || r.video;
+    if (typeof vid === "string" && vid) return { type: "video", url: vid };
+    const img = r.generated_image || r.image || (Array.isArray(r.generated_images) ? r.generated_images[0] : "");
+    if (typeof img === "string" && img) return { type: "image", url: img };
+  } catch {
+    /* result may be a plain message, not JSON */
+  }
+  return null;
+}
+
 export default function Dashboard() {
   const [comfyStatus, setComfyStatus] = useState<"online" | "offline" | "checking">("checking");
   const [backendStatus, setBackendStatus] = useState<"online" | "offline">("online");
@@ -460,6 +476,26 @@ export default function Dashboard() {
                               </div>
                           </div>
                           <div className="flex items-center gap-4">
+                              {(() => {
+                                  const media = getTaskMedia(task.result);
+                                  if (!media) return null;
+                                  return media.type === "video" ? (
+                                      <video
+                                          src={media.url}
+                                          muted
+                                          playsInline
+                                          preload="metadata"
+                                          className="h-12 w-12 rounded object-cover border border-border bg-black/5"
+                                      />
+                                  ) : (
+                                      <img
+                                          src={media.url}
+                                          alt=""
+                                          loading="lazy"
+                                          className="h-12 w-12 rounded object-cover border border-border bg-black/5"
+                                      />
+                                  );
+                              })()}
                               {task.status === "running" && (
                                   <div className="w-24">
                                       <Progress value={task.progress || 0} className="h-1.5" />

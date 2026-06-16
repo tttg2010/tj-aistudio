@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, Download, Images, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import WorkflowBadge from "@/components/WorkflowBadge";
 
 import type { MultiVisualImage, MultiVisualProject } from "@/types";
 import {
@@ -308,6 +309,9 @@ export default function MultiVisualProjectDetail() {
           </button>
           <div>
               <h1 className="text-3xl font-bold">{project?.name || "多视觉图项目"}</h1>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <WorkflowBadge section="multi_visual" media="image" />
+              </div>
               <p className="mt-1 text-sm text-muted-foreground">
               {project?.description || ""} {project?.code ? `· 文件夹：${project.code}` : ""}{project?.visual_type ? ` · 类型：${getMultiVisualTypeLabel(project.visual_type)}` : ""}
               </p>

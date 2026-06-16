@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, ChevronDown, Download, Hand, ImagePlus, Play, Plus, RefreshCw, Save, Settings2, Sparkles, Trash2, UploadCloud, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import WorkflowBadge from "@/components/WorkflowBadge";
 
 import type { LLMStreamState, StoreVisitBloggerReference, StoreVisitDishGenerationItem, StoreVisitProject, StoreVisitSpot } from "@/types";
 import { Input } from "@/components/ui/input";
@@ -1514,6 +1515,10 @@ export default function StoreVisitProjectDetail() {
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-2 min-w-0">
           <h1 className="text-3xl font-bold">{project?.name || "博主探店项目"}</h1>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <WorkflowBadge section="store_visit" media="image" />
+            <WorkflowBadge section="store_visit" media="video" />
+          </div>
           <p className="text-sm text-muted-foreground">
             {project?.description || ""}
             {project?.code ? ` · 文件夹：${project.code}` : ""}

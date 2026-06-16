@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, ChevronDown, Download, Play, RefreshCw, Save, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import WorkflowBadge from "@/components/WorkflowBadge";
 
 import type { AudioProductionLine, AudioProductionPresetOption, AudioProductionProject } from "@/types";
 import { Input } from "@/components/ui/input";
@@ -244,6 +245,9 @@ export default function AudioProductionProjectDetail({ mode }: { mode: AudioProd
           </button>
           <h1 className="truncate text-3xl font-bold">{project?.name || meta.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">文件名：{project?.code}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <WorkflowBadge section={`audio_production_${mode}`} media="audio" />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={fetchAll} className="rounded-md border px-3 py-2 text-sm hover:bg-muted">
