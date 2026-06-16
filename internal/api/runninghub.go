@@ -12,10 +12,38 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// RunningHub task concurrency gate. The free tier allows a single concurrent
+// task, so all RunningHub generation (image/video/audio) is serialized through
+// this gate; the limit is read live from settings (runninghub_concurrency, >=1).
+var (
+	rhGateMu     sync.Mutex
+	rhGateActive int
+	rhGateCond   = sync.NewCond(&rhGateMu)
+)
+
+func rhGateAcquire() {
+	rhGateMu.Lock()
+	for rhGateActive >= getRunningHubConcurrency() {
+		rhGateCond.Wait()
+	}
+	rhGateActive++
+	rhGateMu.Unlock()
+}
+
+func rhGateRelease() {
+	rhGateMu.Lock()
+	if rhGateActive > 0 {
+		rhGateActive--
+	}
+	rhGateCond.Broadcast()
+	rhGateMu.Unlock()
+}
 
 // RunningHub (https://www.runninghub.cn) classic OpenAPI client.
 //
@@ -469,6 +497,9 @@ func runRunningHubImageTask(templateFileName string, template, injected map[stri
 	}
 	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
 
+	rhGateAcquire()
+	defer rhGateRelease()
+
 	taskID, err := runningHubCreateTask(workflowID, nodeInfoList)
 	if err != nil {
 		return "", err
@@ -511,6 +542,9 @@ func runRunningHubVideoTask(templateFileName string, template, injected map[stri
 		return "", fmt.Errorf("workflow「%s」未在设置里映射 RunningHub workflowId", templateFileName)
 	}
 	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
+
+	rhGateAcquire()
+	defer rhGateRelease()
 
 	taskID, err := runningHubCreateTask(workflowID, nodeInfoList)
 	if err != nil {
@@ -555,6 +589,9 @@ func runRunningHubAudioTask(templateFileName string, template, injected map[stri
 		return "", fmt.Errorf("workflow「%s」未在设置里映射 RunningHub workflowId", templateFileName)
 	}
 	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
+
+	rhGateAcquire()
+	defer rhGateRelease()
 
 	taskID, err := runningHubCreateTask(workflowID, nodeInfoList)
 	if err != nil {

@@ -24,12 +24,33 @@ const modeMeta = {
   },
 } satisfies Record<AudioProductionMode, { title: string; backPath: string; settingsTitle: string }>;
 
+const extractDownloadFilename = (contentDisposition: string | undefined, fallback: string) => {
+  if (!contentDisposition) return fallback;
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(contentDisposition);
+  if (match && match[1]) {
+    try { return decodeURIComponent(match[1]); } catch { return match[1]; }
+  }
+  return fallback;
+};
+
+const triggerBlobDownload = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 export default function AudioProductionProjectDetail({ mode }: { mode: AudioProductionMode }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const meta = modeMeta[mode];
   const [project, setProject] = useState<AudioProductionProject | null>(null);
   const [lines, setLines] = useState<AudioProductionLine[]>([]);
+  const [exportingArchive, setExportingArchive] = useState(false);
   const [speakerPresets, setSpeakerPresets] = useState<AudioProductionPresetOption[]>([]);
   const [instructPresets, setInstructPresets] = useState<AudioProductionPresetOption[]>([]);
   const [voicePromptPresets, setVoicePromptPresets] = useState<AudioProductionPresetOption[]>([]);
@@ -149,6 +170,35 @@ export default function AudioProductionProjectDetail({ mode }: { mode: AudioProd
     }
   };
 
+  const exportArchive = async () => {
+    if (!project) return;
+    setExportingArchive(true);
+    try {
+      const res = await axios.post(`/api/audio-production-projects/${project.id}/export`, {}, {
+        responseType: "blob",
+      });
+      const filename = extractDownloadFilename(
+        res.headers["content-disposition"],
+        `${project.code || "audio_production"}_export.zip`,
+      );
+      triggerBlobDownload(res.data, filename);
+      toast.success("导出压缩包已开始下载");
+    } catch (err: any) {
+      let message = "导出失败";
+      if (err?.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          message = JSON.parse(text)?.error || message;
+        } catch {}
+      } else if (err?.response?.data?.error) {
+        message = err.response.data.error;
+      }
+      toast.error(message);
+    } finally {
+      setExportingArchive(false);
+    }
+  };
+
   const generateAll = async (randomSeed = false) => {
     if (!id) return;
     setGenerateMenuOpen(false);
@@ -199,6 +249,10 @@ export default function AudioProductionProjectDetail({ mode }: { mode: AudioProd
           <button onClick={fetchAll} className="rounded-md border px-3 py-2 text-sm hover:bg-muted">
             <RefreshCw className="mr-1 inline h-4 w-4" />
             刷新
+          </button>
+          <button onClick={exportArchive} disabled={exportingArchive} className="rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-60">
+            <Download className="mr-1 inline h-4 w-4" />
+            {exportingArchive ? "导出中..." : "导出"}
           </button>
           <Popover open={generateMenuOpen} onOpenChange={setGenerateMenuOpen}>
             <PopoverTrigger asChild>

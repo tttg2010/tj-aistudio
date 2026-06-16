@@ -9,6 +9,7 @@
 # Markdown documents
 *.md
 !/README.md
+!/FRAMEWORK.md
 
 # Generated output
 output/

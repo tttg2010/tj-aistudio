@@ -293,6 +293,7 @@ func main() {
 		apiGroup.POST("/audio-production-projects/:id/save-lines", api.SaveAudioProductionLines)
 		apiGroup.POST("/audio-production-projects/:id/generate-lines", api.GenerateAudioProductionProjectLines)
 		apiGroup.POST("/audio-production-lines/:lineId/generate", api.GenerateAudioProductionLine)
+		apiGroup.POST("/audio-production-projects/:id/export", api.ExportAudioProductionProjectArchive)
 
 		// Project Routes
 		apiGroup.GET("/projects", api.ListProjects)

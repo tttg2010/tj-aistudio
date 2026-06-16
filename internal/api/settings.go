@@ -46,6 +46,7 @@ const (
 	KeyRunningHubWorkflowMap     = "runninghub_workflow_map"
 	KeyRunningHubInstanceType    = "runninghub_instance_type"
 	KeyAudioGenerationProvider   = "audio_generation_provider"
+	KeyRunningHubConcurrency     = "runninghub_concurrency"
 )
 
 const (
@@ -111,6 +112,7 @@ func InitDefaultSettings() {
 		KeyRunningHubWorkflowMap:   "{}",
 		KeyRunningHubInstanceType:  "",
 		KeyAudioGenerationProvider: AudioGenerationProviderLocal,
+		KeyRunningHubConcurrency:   "1",
 	}
 
 	for key, value := range defaults {
@@ -207,6 +209,8 @@ func getDescription(key string) string {
 		return "RunningHub 机型（留空为默认，48G 机型填 plus）"
 	case KeyAudioGenerationProvider:
 		return "音频/TTS 生成接入方式（local/runninghub）"
+	case KeyRunningHubConcurrency:
+		return "RunningHub 并发任务上限（免费档为 1，付费可调高）"
 	default:
 		return ""
 	}
@@ -331,6 +335,18 @@ func getConfiguredAudioGenerationProvider() string {
 		return normalizeAudioGenerationProvider(defaultSettingValue(KeyAudioGenerationProvider))
 	}
 	return normalizeAudioGenerationProvider(setting.Value)
+}
+
+// getRunningHubConcurrency returns the max number of RunningHub tasks allowed to
+// run at once (free tier is 1). Always >= 1.
+func getRunningHubConcurrency() int {
+	var setting models.SystemSettings
+	if err := db.DB.Where("key = ?", KeyRunningHubConcurrency).First(&setting).Error; err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(setting.Value)); err == nil && n >= 1 {
+			return n
+		}
+	}
+	return 1
 }
 
 func getSettingValue(key string) string {
@@ -636,6 +652,8 @@ func defaultSettingValue(key string) string {
 		return ""
 	case KeyAudioGenerationProvider:
 		return AudioGenerationProviderLocal
+	case KeyRunningHubConcurrency:
+		return "1"
 	default:
 		return ""
 	}

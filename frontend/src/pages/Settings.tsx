@@ -55,6 +55,7 @@ export default function Settings() {
         runninghub_api_key: "",
         runninghub_instance_type: "",
         runninghub_workflow_map: "{}",
+        runninghub_concurrency: "1",
         audio_generation_provider: "local",
     });
 
@@ -329,6 +330,17 @@ export default function Settings() {
                                         onChange={e => updateSetting("runninghub_instance_type", e.target.value)}
                                         placeholder="留空为默认；48G 机型填 plus"
                                     />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">并发任务上限</label>
+                                    <Input
+                                        type="number"
+                                        min="1"
+                                        value={settings.runninghub_concurrency}
+                                        onChange={e => updateSetting("runninghub_concurrency", e.target.value)}
+                                        placeholder="1"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">免费档为 1（批量生成会自动排队串行）。付费套餐可调高以并行出片。</p>
                                 </div>
                                 <div className="flex items-end gap-3">
                                     <button
