@@ -169,7 +169,8 @@ func queueQwenTTSLinePrompt(project models.QwenTTSProject, line models.QwenTTSLi
 	if err != nil {
 		return "", "", "", err
 	}
-	template, err := loadStoreVisitWorkflowTemplate(qwenTTSWorkflowPath)
+	audioWFPath := resolveSectionWorkflowFile("qwen_tts", "audio", qwenTTSWorkflowPath)
+	template, err := loadStoreVisitWorkflowTemplate(audioWFPath)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -181,7 +182,7 @@ func queueQwenTTSLinePrompt(project models.QwenTTSProject, line models.QwenTTSLi
 	if audioProvider == AudioGenerationProviderRunningHub {
 		saveDir := qwenTTSGeneratedDir(project.Code)
 		fileBase := fmt.Sprintf("line_%02d_%d", line.SortOrder, line.ID)
-		webPath, rhErr := runRunningHubAudioTask(filepath.Base(qwenTTSWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		webPath, rhErr := runRunningHubAudioTask(filepath.Base(audioWFPath), template, workflowJSON, saveDir, fileBase)
 		if rhErr != nil {
 			return "", "", "", rhErr
 		}

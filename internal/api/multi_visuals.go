@@ -1124,7 +1124,7 @@ func HandleRenderMultiVisualProjectTask(t *models.Task) (interface{}, error) {
 		return nil, err
 	}
 
-	template, err := loadMultiVisualWorkflowTemplate(multiVisualWorkflowPath)
+	template, err := loadMultiVisualWorkflowTemplate(resolveSectionWorkflowFile("multi_visual", "image", multiVisualWorkflowPath))
 	if err != nil {
 		_ = setMultiVisualProjectStatus(project.ID, "failed", "", err.Error())
 		return nil, err

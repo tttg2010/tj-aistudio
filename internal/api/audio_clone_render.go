@@ -148,7 +148,8 @@ func queueAudioCloneLinePrompt(project models.AudioCloneProject, line models.Aud
 	if err != nil {
 		return "", "", "", err
 	}
-	template, err := loadStoreVisitWorkflowTemplate(audioCloneWorkflowPath)
+	audioWFPath := resolveSectionWorkflowFile("audio_clone", "audio", audioCloneWorkflowPath)
+	template, err := loadStoreVisitWorkflowTemplate(audioWFPath)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -160,7 +161,7 @@ func queueAudioCloneLinePrompt(project models.AudioCloneProject, line models.Aud
 	if audioProvider == AudioGenerationProviderRunningHub {
 		saveDir := audioCloneGeneratedDir(project.Code)
 		fileBase := fmt.Sprintf("line_%02d_%d", line.SortOrder, line.ID)
-		webPath, rhErr := runRunningHubAudioTask(filepath.Base(audioCloneWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		webPath, rhErr := runRunningHubAudioTask(filepath.Base(audioWFPath), template, workflowJSON, saveDir, fileBase)
 		if rhErr != nil {
 			return "", "", "", rhErr
 		}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import { Activity, Server, Zap, HardDrive, Cpu, Network, CheckCircle2, XCircle, Clock, Loader2, Trash2 } from "lucide-react";
+import { Activity, Server, Zap, HardDrive, Cpu, Network, CheckCircle2, XCircle, Clock, Loader2, Trash2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -84,6 +84,7 @@ export default function Dashboard() {
   const [monitor, setMonitor] = useState<SystemMonitor | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ type: "image" | "video"; url: string } | null>(null);
 
   // Format bytes to human readable
   const formatBytes = (bytes: number, decimals = 2) => {
@@ -479,20 +480,29 @@ export default function Dashboard() {
                               {(() => {
                                   const media = getTaskMedia(task.result);
                                   if (!media) return null;
+                                  const openPreview = (e: React.MouseEvent) => {
+                                      e.stopPropagation();
+                                      setPreviewMedia(media);
+                                  };
                                   return media.type === "video" ? (
-                                      <video
-                                          src={media.url}
-                                          muted
-                                          playsInline
-                                          preload="metadata"
-                                          className="h-12 w-12 rounded object-cover border border-border bg-black/5"
-                                      />
+                                      <div className="relative h-12 w-12 shrink-0 cursor-zoom-in" onClick={openPreview} title="点击播放">
+                                          <video
+                                              src={media.url}
+                                              muted
+                                              playsInline
+                                              preload="metadata"
+                                              className="h-12 w-12 rounded object-cover border border-border bg-black/5 hover:ring-2 hover:ring-primary"
+                                          />
+                                          <Play className="absolute inset-0 m-auto h-5 w-5 text-white drop-shadow" />
+                                      </div>
                                   ) : (
                                       <img
                                           src={media.url}
                                           alt=""
                                           loading="lazy"
-                                          className="h-12 w-12 rounded object-cover border border-border bg-black/5"
+                                          onClick={openPreview}
+                                          title="点击放大"
+                                          className="h-12 w-12 shrink-0 cursor-zoom-in rounded object-cover border border-border bg-black/5 hover:ring-2 hover:ring-primary"
                                       />
                                   );
                               })()}
@@ -561,6 +571,30 @@ export default function Dashboard() {
               <div className="flex-1 overflow-y-auto bg-muted/50 p-4 rounded-md mt-2 font-mono text-xs whitespace-pre-wrap break-all">
                   {selectedTask?.result || selectedTask?.error || "等待数据返回..."}
               </div>
+          </DialogContent>
+      </Dialog>
+
+      {/* Media preview (enlarge image / play video) */}
+      <Dialog open={!!previewMedia} onOpenChange={(open) => !open && setPreviewMedia(null)}>
+          <DialogContent className="max-w-4xl border-0 bg-black/95 p-2">
+              <DialogHeader className="sr-only">
+                  <DialogTitle>媒体预览</DialogTitle>
+                  <DialogDescription>任务生成结果预览</DialogDescription>
+              </DialogHeader>
+              {previewMedia?.type === "video" ? (
+                  <video
+                      src={previewMedia.url}
+                      controls
+                      autoPlay
+                      className="max-h-[80vh] w-full rounded"
+                  />
+              ) : previewMedia ? (
+                  <img
+                      src={previewMedia.url}
+                      alt=""
+                      className="max-h-[80vh] w-full rounded object-contain"
+                  />
+              ) : null}
           </DialogContent>
       </Dialog>
     </div>

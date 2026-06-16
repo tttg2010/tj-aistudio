@@ -367,6 +367,7 @@ func main() {
 
 		// Active workflow resolution (debug aid: which workflow each generate action uses)
 		apiGroup.GET("/active-workflows", api.GetActiveWorkflows)
+		apiGroup.POST("/section-workflow", api.SetSectionWorkflow)
 
 		// System Routes
 		apiGroup.GET("/system/info", api.GetSystemInfo)

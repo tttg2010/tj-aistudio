@@ -1631,7 +1631,7 @@ func videoWorkflowFileForProvider() string {
 }
 
 func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.StoreVisitProject, seed int64) (map[string]interface{}, string, error) {
-	videoWorkflowPath := videoWorkflowFileForProvider()
+	videoWorkflowPath := storeVisitVideoWorkflowFile()
 	data, err := os.ReadFile(videoWorkflowPath)
 	if err != nil {
 		return nil, "", err
@@ -1858,7 +1858,8 @@ func HandleRenderStoreVisitSpotImageTask(t *models.Task) (interface{}, error) {
 	spotLabel := getStoreVisitSpotDisplayName(spot)
 	spotKey := getStoreVisitSpotFileKey(spot)
 
-	template, err := loadStoreVisitWorkflowTemplate(storeVisitImageWorkflowPath)
+	imageWFPath := resolveSectionWorkflowFile("store_visit", "image", storeVisitImageWorkflowPath)
+	template, err := loadStoreVisitWorkflowTemplate(imageWFPath)
 	if err != nil {
 		_ = db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
 			"image_status":          "failed",
@@ -1913,13 +1914,13 @@ func HandleRenderStoreVisitSpotImageTask(t *models.Task) (interface{}, error) {
 		return nil, err
 	}
 
-	logComfyWorkflowPayload("Store Visit Image Payload", workflowDisplayNameFromPath(storeVisitImageWorkflowPath), workflowJSON)
+	logComfyWorkflowPayload("Store Visit Image Payload", workflowDisplayNameFromPath(imageWFPath), workflowJSON)
 
 	var webPath string
 	if imageProvider == ImageGenerationProviderRunningHub {
 		saveDir := storeVisitImagesDir(project.Code)
 		fileBase := fmt.Sprintf("%s_%d", spotKey, spot.ID)
-		webPath, err = runRunningHubImageTask(filepath.Base(storeVisitImageWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		webPath, err = runRunningHubImageTask(filepath.Base(imageWFPath), template, workflowJSON, saveDir, fileBase)
 		if err == nil {
 			Log(LogLevelInfo, fmt.Sprintf("博主探店%s图片已通过 RunningHub 生成", spotLabel), fmt.Sprintf("ProjectID: %d\nSpotID: %d", project.ID, spot.ID))
 			task.GlobalTaskManager.UpdateTaskProgress(t.ID, 80, "")
@@ -1968,7 +1969,7 @@ func HandleRenderStoreVisitSpotImageTask(t *models.Task) (interface{}, error) {
 		"image_status":             "generated",
 		"image_current_task_id":    "",
 		"image_last_error":         "",
-		"image_generated_workflow": workflowDisplayNameFromPath(storeVisitImageWorkflowPath),
+		"image_generated_workflow": workflowDisplayNameFromPath(imageWFPath),
 		"updated_at":               time.Now(),
 	}).Error; err != nil {
 		return nil, err
@@ -2011,7 +2012,7 @@ func HandleRenderStoreVisitSpotVideoTask(t *models.Task) (interface{}, error) {
 
 	var webPath string
 	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
-		videoWorkflowPath := videoWorkflowFileForProvider()
+		videoWorkflowPath := storeVisitVideoWorkflowFile()
 		template, terr := loadStoreVisitWorkflowTemplate(videoWorkflowPath)
 		if terr != nil {
 			err = terr

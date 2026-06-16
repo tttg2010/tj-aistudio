@@ -98,7 +98,7 @@ func buildGeneralGuideImageWorkflow(template map[string]interface{}, sceneImageN
 	if err := setStoreVisitWorkflowInput(workflowJSON, "9", "filename_prefix", fmt.Sprintf("%s_%s_image_%d", project.Code, getGeneralGuideSceneFileKey(scene), scene.ID)); err != nil {
 		return nil, "", err
 	}
-	label := workflowDisplayNameFromPath(generalGuideImageWorkflowPath)
+	label := workflowDisplayNameFromPath(resolveSectionWorkflowFile("general_guide", "image", generalGuideImageWorkflowPath))
 	if useLightningLoRA {
 		label += "（Lightning LoRA）"
 	} else {
@@ -108,7 +108,7 @@ func buildGeneralGuideImageWorkflow(template map[string]interface{}, sceneImageN
 }
 
 func buildGeneralGuideVideoWorkflow(scene models.GeneralGuideScene, project models.GeneralGuideProject, seed int64) (map[string]interface{}, string, error) {
-	videoWorkflowPath := videoWorkflowFileForProvider()
+	videoWorkflowPath := generalGuideVideoWorkflowFile()
 	data, err := os.ReadFile(videoWorkflowPath)
 	if err != nil {
 		return nil, "", err
@@ -611,7 +611,8 @@ func HandleRenderGeneralGuideSceneImageTask(t *models.Task) (interface{}, error)
 		return gin.H{"generated_image": webPath}, nil
 	}
 
-	template, err := loadStoreVisitWorkflowTemplate(generalGuideImageWorkflowPath)
+	imageWFPath := resolveSectionWorkflowFile("general_guide", "image", generalGuideImageWorkflowPath)
+	template, err := loadStoreVisitWorkflowTemplate(imageWFPath)
 	if err != nil {
 		if shouldApplyGeneralGuideSceneImageTaskResult(scene.ID, t.ID) {
 			_ = db.DB.Model(&models.GeneralGuideScene{}).Where("id = ?", scene.ID).Updates(map[string]interface{}{
@@ -658,7 +659,7 @@ func HandleRenderGeneralGuideSceneImageTask(t *models.Task) (interface{}, error)
 	if imageProvider == ImageGenerationProviderRunningHub {
 		saveDir := generalGuideImagesDir(project.Code)
 		fileBase := fmt.Sprintf("%s_%d", sceneKey, scene.ID)
-		webPath, err = runRunningHubImageTask(filepath.Base(generalGuideImageWorkflowPath), template, workflowJSON, saveDir, fileBase)
+		webPath, err = runRunningHubImageTask(filepath.Base(imageWFPath), template, workflowJSON, saveDir, fileBase)
 		if err == nil {
 			workflowLabel += "（RunningHub）"
 			Log(LogLevelInfo, "综合讲解图片已通过 RunningHub 生成", fmt.Sprintf("ProjectID: %d\nSceneID: %d\nWorkflow: %s", project.ID, scene.ID, workflowLabel))
@@ -744,7 +745,7 @@ func HandleRenderGeneralGuideSceneVideoTask(t *models.Task) (interface{}, error)
 
 	var webPath string
 	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
-		videoWorkflowPath := videoWorkflowFileForProvider()
+		videoWorkflowPath := generalGuideVideoWorkflowFile()
 		template, terr := loadStoreVisitWorkflowTemplate(videoWorkflowPath)
 		if terr != nil {
 			err = terr

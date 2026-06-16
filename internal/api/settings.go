@@ -47,6 +47,7 @@ const (
 	KeyRunningHubInstanceType    = "runninghub_instance_type"
 	KeyAudioGenerationProvider   = "audio_generation_provider"
 	KeyRunningHubConcurrency     = "runninghub_concurrency"
+	KeySectionWorkflowMap        = "section_workflow_map"
 )
 
 const (
@@ -113,6 +114,7 @@ func InitDefaultSettings() {
 		KeyRunningHubInstanceType:  "",
 		KeyAudioGenerationProvider: AudioGenerationProviderLocal,
 		KeyRunningHubConcurrency:   "1",
+		KeySectionWorkflowMap:      "{}",
 	}
 
 	for key, value := range defaults {
@@ -654,6 +656,8 @@ func defaultSettingValue(key string) string {
 		return AudioGenerationProviderLocal
 	case KeyRunningHubConcurrency:
 		return "1"
+	case KeySectionWorkflowMap:
+		return "{}"
 	default:
 		return ""
 	}

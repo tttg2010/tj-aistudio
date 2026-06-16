@@ -68,15 +68,18 @@ func shouldApplyAudioProductionLineTaskResult(lineID uint, taskID string) bool {
 }
 
 func buildAudioProductionWorkflow(project models.AudioProductionProject, line models.AudioProductionLine, seed int64) (map[string]interface{}, string, error) {
-	var workflowPath string
+	var workflowPath, section string
 	switch project.Mode {
 	case audioProductionModeCustomVoice:
 		workflowPath = audioProductionCustomVoiceWorkflowPath
+		section = "audio_production_custom_voice"
 	case audioProductionModeVoicePrompt:
 		workflowPath = audioProductionVoicePromptWorkflowPath
+		section = "audio_production_voice_prompt"
 	default:
 		return nil, "", fmt.Errorf("unsupported audio production mode: %s", project.Mode)
 	}
+	workflowPath = resolveSectionWorkflowFile(section, "audio", workflowPath)
 	template, err := loadStoreVisitWorkflowTemplate(workflowPath)
 	if err != nil {
 		return nil, "", err
@@ -229,10 +232,13 @@ func HandleRenderAudioProductionLineTask(t *models.Task) (interface{}, error) {
 
 	var webPath string
 	if getConfiguredAudioGenerationProvider() == AudioGenerationProviderRunningHub {
-		tmplPath := audioProductionCustomVoiceWorkflowPath
+		tmplDefault := audioProductionCustomVoiceWorkflowPath
+		section := "audio_production_custom_voice"
 		if project.Mode == audioProductionModeVoicePrompt {
-			tmplPath = audioProductionVoicePromptWorkflowPath
+			tmplDefault = audioProductionVoicePromptWorkflowPath
+			section = "audio_production_voice_prompt"
 		}
+		tmplPath := resolveSectionWorkflowFile(section, "audio", tmplDefault)
 		template, terr := loadStoreVisitWorkflowTemplate(tmplPath)
 		if terr != nil {
 			err = terr

@@ -660,7 +660,8 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 		}, nil
 	}
 
-	template, err := loadStoreVisitWorkflowTemplate(storeVisitImageWorkflowPath)
+	imageWFPath := resolveSectionWorkflowFile("store_visit", "image", storeVisitImageWorkflowPath)
+	template, err := loadStoreVisitWorkflowTemplate(imageWFPath)
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +708,7 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 			failed = append(failed, fmt.Sprintf("%s: %v", label, err))
 			continue
 		}
-		logComfyWorkflowPayload("Store Visit Image Payload", workflowDisplayNameFromPath(storeVisitImageWorkflowPath), workflowJSON)
+		logComfyWorkflowPayload("Store Visit Image Payload", workflowDisplayNameFromPath(imageWFPath), workflowJSON)
 
 		// Mark the spot as generating before submission so the UI reflects progress.
 		if err := db.DB.Model(&models.StoreVisitSpot{}).Where("id = ?", spot.ID).Updates(map[string]interface{}{
@@ -733,7 +734,7 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 			// generate, download and persist this spot before moving to the next.
 			saveDir := storeVisitImagesDir(project.Code)
 			fileBase := fmt.Sprintf("%s_%d", getStoreVisitSpotFileKey(spot), spot.ID)
-			webPath, rhErr := runRunningHubImageTask(filepath.Base(storeVisitImageWorkflowPath), template, workflowJSON, saveDir, fileBase)
+			webPath, rhErr := runRunningHubImageTask(filepath.Base(imageWFPath), template, workflowJSON, saveDir, fileBase)
 			if rhErr != nil || strings.TrimSpace(webPath) == "" {
 				msg := "未获取到图片输出"
 				if rhErr != nil {
@@ -754,7 +755,7 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 				"image_status":             "generated",
 				"image_current_task_id":    "",
 				"image_last_error":         "",
-				"image_generated_workflow": workflowDisplayNameFromPath(storeVisitImageWorkflowPath) + "（RunningHub）",
+				"image_generated_workflow": workflowDisplayNameFromPath(imageWFPath) + "（RunningHub）",
 				"updated_at":               time.Now(),
 			}).Error
 			BroadcastUpdate("store_visit_spot", spot.ID)
@@ -777,7 +778,7 @@ func queueAndRenderStoreVisitProjectImages(taskID string, project models.StoreVi
 		queued = append(queued, queuedStoreVisitSpotRender{
 			Spot:          spot,
 			PromptID:      promptID,
-			WorkflowLabel: workflowDisplayNameFromPath(storeVisitImageWorkflowPath),
+			WorkflowLabel: workflowDisplayNameFromPath(imageWFPath),
 		})
 	}
 
@@ -829,7 +830,7 @@ func queueAndRenderStoreVisitProjectVideos(taskID string, project models.StoreVi
 	videoProvider := getConfiguredVideoGenerationProvider()
 	rhGenerated := 0
 	var rhVideoTemplate map[string]interface{}
-	videoWorkflowPath := videoWorkflowFileForProvider()
+	videoWorkflowPath := storeVisitVideoWorkflowFile()
 	if videoProvider == VideoGenerationProviderRunningHub {
 		tmpl, terr := loadStoreVisitWorkflowTemplate(videoWorkflowPath)
 		if terr != nil {
