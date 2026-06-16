@@ -66,6 +66,13 @@ func SetSectionWorkflow(c *gin.Context) {
 		return
 	}
 
+	// Only video workflows are switchable: image/audio inject by fixed node IDs, so
+	// swapping to a structurally-different workflow breaks generation.
+	if media != "video" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "图片/音频工作流的参数按固定节点注入，不支持切换"})
+		return
+	}
+
 	// "__default__" clears the override so the section falls back to its built-in
 	// (provider-conditional) default. Not applicable to short-drama, which always
 	// resolves via the default-model setting.
@@ -208,6 +215,8 @@ func GetActiveWorkflows(c *gin.Context) {
 		makeActiveWorkflowEntry("audio_production_voice_prompt", "配音·按提示生成", "audio", resolveSectionWorkflowFile("audio_production_voice_prompt", "audio", audioProductionVoicePromptWorkflowPath), audP),
 		makeActiveWorkflowEntry("qwen_tts", "Qwen3 TTS 语音克隆", "audio", resolveSectionWorkflowFile("qwen_tts", "audio", qwenTTSWorkflowPath), audP),
 		makeActiveWorkflowEntry("audio_clone", "LongCat 语音克隆", "audio", resolveSectionWorkflowFile("audio_clone", "audio", audioCloneWorkflowPath), audP),
+		// Text-to-video is RunningHub-only.
+		makeActiveWorkflowEntry("text_to_video", "文生视频", "video", resolveSectionWorkflowFile("text_to_video", "video", textToVideoWorkflowPath), VideoGenerationProviderRunningHub),
 	}
 
 	bySection := map[string]map[string]activeWorkflowEntry{}

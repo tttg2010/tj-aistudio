@@ -234,6 +234,32 @@ export interface AudioProductionLine {
   updated_at?: string;
 }
 
+export interface TextToVideoProject {
+  id: number;
+  name: string;
+  code: string;
+  description: string;
+  text: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TextToVideoLine {
+  id: number;
+  project_id: number;
+  sort_order: number;
+  prompt: string;
+  negative_prompt: string;
+  seed: number;
+  status: string;
+  current_task_id?: string;
+  last_error?: string;
+  generated_video: string;
+  generated_workflow?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface AudioProductionPresetOption {
   label: string;
   value: string;

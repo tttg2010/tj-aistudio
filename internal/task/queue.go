@@ -56,6 +56,10 @@ var rhRoutedTaskProvider = map[string]string{
 }
 
 func runningHubRoutedTask(taskType string) bool {
+	// Text-to-video is RunningHub-only regardless of provider settings.
+	if taskType == "render_text_to_video_line" {
+		return true
+	}
 	key, ok := rhRoutedTaskProvider[taskType]
 	if !ok {
 		return false

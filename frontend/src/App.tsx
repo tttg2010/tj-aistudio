@@ -18,6 +18,8 @@ import QwenTTSProjects from "./pages/QwenTTSProjects";
 import QwenTTSProjectDetail from "./pages/QwenTTSProjectDetail";
 import AudioProductionProjects from "./pages/AudioProductionProjects";
 import AudioProductionProjectDetail from "./pages/AudioProductionProjectDetail";
+import TextToVideoProjects from "./pages/TextToVideoProjects";
+import TextToVideoProjectDetail from "./pages/TextToVideoProjectDetail";
 import LLMEngine from "./pages/LLMEngine";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
@@ -50,6 +52,8 @@ function App() {
             <Route path="audio-production/custom-voice/:id" element={<AudioProductionProjectDetail mode="custom_voice" />} />
             <Route path="audio-production/voice-prompt" element={<AudioProductionProjects mode="voice_prompt" />} />
             <Route path="audio-production/voice-prompt/:id" element={<AudioProductionProjectDetail mode="voice_prompt" />} />
+            <Route path="text-to-video" element={<TextToVideoProjects />} />
+            <Route path="text-to-video/:id" element={<TextToVideoProjectDetail />} />
             <Route path="llm" element={<LLMEngine />} />
             <Route path="logs" element={<Logs />} />
             <Route path="settings" element={<Settings />} />

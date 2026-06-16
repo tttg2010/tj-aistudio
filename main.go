@@ -109,6 +109,7 @@ func main() {
 	task.GlobalTaskManager.RegisterHandler("render_qwen_tts_line", api.HandleRenderQwenTTSLineTask)
 	task.GlobalTaskManager.RegisterHandler("recognize_qwen_tts_character_reference", api.HandleRecognizeQwenTTSCharacterReferenceTask)
 	task.GlobalTaskManager.RegisterHandler("render_audio_production_line", api.HandleRenderAudioProductionLineTask)
+	task.GlobalTaskManager.RegisterHandler("render_text_to_video_line", api.HandleRenderTextToVideoLineTask)
 
 	// 4. 设置路由
 	r := gin.Default()
@@ -294,6 +295,18 @@ func main() {
 		apiGroup.POST("/audio-production-projects/:id/generate-lines", api.GenerateAudioProductionProjectLines)
 		apiGroup.POST("/audio-production-lines/:lineId/generate", api.GenerateAudioProductionLine)
 		apiGroup.POST("/audio-production-projects/:id/export", api.ExportAudioProductionProjectArchive)
+
+		// Text-to-Video Routes
+		apiGroup.GET("/text-to-video-projects", api.ListTextToVideoProjects)
+		apiGroup.POST("/text-to-video-projects", api.CreateTextToVideoProject)
+		apiGroup.GET("/text-to-video-projects/:id", api.GetTextToVideoProject)
+		apiGroup.PUT("/text-to-video-projects/:id", api.UpdateTextToVideoProject)
+		apiGroup.DELETE("/text-to-video-projects/:id", api.DeleteTextToVideoProject)
+		apiGroup.GET("/text-to-video-projects/:id/lines", api.ListTextToVideoLines)
+		apiGroup.POST("/text-to-video-projects/:id/save-lines", api.SaveTextToVideoLines)
+		apiGroup.POST("/text-to-video-projects/:id/generate-lines", api.GenerateTextToVideoProjectLines)
+		apiGroup.POST("/text-to-video-projects/:id/export", api.ExportTextToVideoProjectArchive)
+		apiGroup.POST("/text-to-video-lines/:lineId/generate", api.GenerateTextToVideoLine)
 
 		// Project Routes
 		apiGroup.GET("/projects", api.ListProjects)

@@ -110,6 +110,28 @@ export default function WorkflowBadge({
   const isRH = entry.provider === "runninghub";
   const warn = isRH && !entry.rh_mapped;
   const mediaText = media === "video" ? "视频" : media === "audio" ? "音频" : "图片";
+
+  // Only video workflows are safely swappable (node detection is automatic). Image
+  // and audio inject by fixed node IDs, so switching to a structurally-different
+  // workflow breaks generation — render those as a read-only label.
+  const readonly = media !== "video";
+  const badgeClass = `inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${
+    warn ? "border-red-400 bg-red-50 text-red-600" : "border-border bg-muted/40 text-muted-foreground"
+  }`;
+
+  if (readonly) {
+    const tip = `${mediaText}生成方式：${providerLabel[entry.provider] || entry.provider}${
+      isRH ? (entry.rh_mapped ? "（已映射 workflowId）" : "（未映射 workflowId，会失败）") : ""
+    }`;
+    return (
+      <span title={tip} className={badgeClass}>
+        <span className="opacity-70">工作流:</span>
+        <code className="font-mono">{entry.workflow}</code>
+        {isRH && <span className="opacity-70">· {entry.rh_mapped ? "RH" : "RH⚠"}</span>}
+      </span>
+    );
+  }
+
   const tip = `${mediaText}生成方式：${providerLabel[entry.provider] || entry.provider}${
     isRH ? (entry.rh_mapped ? "（已映射 workflowId）" : "（未映射 workflowId，会失败）") : ""
   } · 点击更换工作流`;

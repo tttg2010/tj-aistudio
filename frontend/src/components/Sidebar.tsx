@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Folder, Palette, BrainCircuit, ScrollText, Settings, Menu, X, Tags, Images, Store, ChevronDown, Megaphone, Clapperboard, Mic2 } from "lucide-react";
+import { LayoutDashboard, Folder, Palette, BrainCircuit, ScrollText, Settings, Menu, X, Tags, Images, Store, ChevronDown, Megaphone, Clapperboard, Mic2, Film } from "lucide-react";
 import { cn } from "../lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -8,6 +8,7 @@ const navigation = [
   { name: "项目首页", href: "/", icon: LayoutDashboard },
   { name: "画风管理", href: "/styles", icon: Palette },
   { name: "多视觉图", href: "/multi-visuals", icon: Images },
+  { name: "文生视频", href: "/text-to-video", icon: Film },
   { name: "LLM 引擎", href: "/llm", icon: BrainCircuit },
   { name: "系统日志", href: "/logs", icon: ScrollText },
   { name: "系统设置", href: "/settings", icon: Settings },

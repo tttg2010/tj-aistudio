@@ -101,6 +101,8 @@ func InitDB(cfg *config.Config) {
 		&models.QwenTTSLine{},
 		&models.AudioProductionProject{},
 		&models.AudioProductionLine{},
+		&models.TextToVideoProject{},
+		&models.TextToVideoLine{},
 		&models.StoreVisitProject{},
 		&models.StoreVisitBloggerReference{},
 		&models.StoreVisitSpot{},
