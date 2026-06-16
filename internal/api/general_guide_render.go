@@ -140,6 +140,7 @@ func buildGeneralGuideVideoWorkflow(scene models.GeneralGuideScene, project mode
 		seed = getConfiguredGlobalSeed()
 	}
 	setInput(meta.SeedNodeID, meta.SeedInputKey, seed)
+	injectLTX2VideoNodes(workflowJSON, strings.TrimSpace(scene.VideoPositivePrompt), seed)
 
 	width := scene.VideoWidth
 	height := scene.VideoHeight

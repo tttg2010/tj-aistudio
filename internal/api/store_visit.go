@@ -1630,6 +1630,34 @@ func videoWorkflowFileForProvider() string {
 	return storeVisitVideoWorkflowPath
 }
 
+// injectLTX2VideoNodes injects the prompt/seed into LTX2-family node types that the
+// standard CLIPTextEncode/KSampler detection misses — notably RunningHub-hosted
+// LTX2.3 workflows, which carry the prompt on a TextGenerateLTX2Prompt node and the
+// seed on RandomNoise. Additive: workflows without these nodes are unaffected.
+func injectLTX2VideoNodes(workflowJSON map[string]interface{}, positivePrompt string, seed int64) {
+	for _, node := range workflowJSON {
+		nm, ok := node.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		ct, _ := nm["class_type"].(string)
+		inputs, ok := nm["inputs"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch ct {
+		case "TextGenerateLTX2Prompt":
+			if _, has := inputs["prompt"]; has && strings.TrimSpace(positivePrompt) != "" {
+				inputs["prompt"] = positivePrompt
+			}
+		case "RandomNoise":
+			if _, has := inputs["noise_seed"]; has {
+				inputs["noise_seed"] = seed
+			}
+		}
+	}
+}
+
 func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.StoreVisitProject, seed int64) (map[string]interface{}, string, error) {
 	videoWorkflowPath := storeVisitVideoWorkflowFile()
 	data, err := os.ReadFile(videoWorkflowPath)
@@ -1664,6 +1692,7 @@ func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.Sto
 		seed = getConfiguredGlobalSeed()
 	}
 	setInput(meta.SeedNodeID, meta.SeedInputKey, seed)
+	injectLTX2VideoNodes(workflowJSON, strings.TrimSpace(spot.VideoPositivePrompt), seed)
 	width := spot.VideoWidth
 	height := spot.VideoHeight
 	if width <= 0 {
