@@ -1703,14 +1703,20 @@ func buildStoreVisitVideoWorkflow(spot models.StoreVisitSpot, project models.Sto
 		return nil, "", err
 	}
 	var uploadedName string
-	if getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub {
+	isRH := getConfiguredVideoGenerationProvider() == VideoGenerationProviderRunningHub
+	if isRH {
 		uploadedName, err = runningHubUploadImage(imageAbsPath)
 	} else {
 		uploadedName, err = UploadToComfyUIInput(imageAbsPath)
 	}
+	if err != nil && isRH {
+		// On RunningHub a local path is not a valid platform file — fail fast with
+		// the real upload error instead of a confusing "file not found" downstream.
+		return nil, "", fmt.Errorf("RunningHub 首帧上传失败: %w", err)
+	}
 	frameValue := uploadedName
 	if err != nil {
-		frameValue = imageAbsPath
+		frameValue = imageAbsPath // local ComfyUI fallback only
 	}
 	for _, id := range imageNodeIDs {
 		setInput(id, "image", frameValue)

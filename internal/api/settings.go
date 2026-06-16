@@ -681,6 +681,27 @@ func buildSceneImageResolutionInstruction() string {
 - 因此，若当前画面只拍到腰部以上、胸口以上、肩颈、脸部或局部身体，你必须把这个裁切范围内真正可见的性别身份、脸部、基础发型/发饰、肩颈与体态轮廓、当前上半身服装结构、主副配色、当前可见装备与持物完整写出；全身镜头则必须把全身可见锚点写全。`, width, height, frameType, width, height, width, height, width, height)
 }
 
+// secretSettingKeys are masked in GET /settings and only overwritten on update
+// when a new (non-masked, non-empty) value is supplied.
+var secretSettingKeys = map[string]bool{
+	KeyRunningHubAPIKey: true,
+	KeyJimengAccessKey:  true,
+	KeyJimengSecretKey:  true,
+}
+
+// maskSecretValue returns a display-safe form ("••••" + last 4) so full secrets
+// never leave the server in the settings response.
+func maskSecretValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	if len(v) <= 4 {
+		return "••••"
+	}
+	return "••••" + v[len(v)-4:]
+}
+
 // GetSettings retrieves all system settings
 func GetSettings(c *gin.Context) {
 	var settings []models.SystemSettings
@@ -713,6 +734,8 @@ func GetSettings(c *gin.Context) {
 			settingsMap[s.Key] = normalizeJimengAspectRatio(s.Value)
 		} else if s.Key == KeyGeneralGuideTransitionEngine {
 			settingsMap[s.Key] = normalizeGeneralGuideTransitionEngine(s.Value)
+		} else if secretSettingKeys[s.Key] {
+			settingsMap[s.Key] = maskSecretValue(s.Value)
 		} else {
 			settingsMap[s.Key] = s.Value
 		}
@@ -745,6 +768,15 @@ func UpdateSettings(c *gin.Context) {
 			strValue = v
 		default:
 			strValue = fmt.Sprintf("%v", v)
+		}
+
+		// Never overwrite a stored secret with an empty or still-masked value
+		// (the frontend re-sends the masked form when the user didn't change it).
+		if secretSettingKeys[key] {
+			tv := strings.TrimSpace(strValue)
+			if tv == "" || strings.Contains(tv, "••••") {
+				continue
+			}
 		}
 
 		if err := tx.Model(&models.SystemSettings{}).Where("key = ?", key).Update("value", strValue).Error; err != nil {

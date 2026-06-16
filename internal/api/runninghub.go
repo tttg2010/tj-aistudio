@@ -168,13 +168,45 @@ func runningHubCreateTask(workflowID string, nodeInfoList []RHNodeInfo) (string,
 	return strings.TrimSpace(data.TaskID), nil
 }
 
+// isSeedFieldName reports whether an input key holds a KSampler seed.
+func isSeedFieldName(key string) bool {
+	k := strings.ToLower(strings.TrimSpace(key))
+	return k == "seed" || k == "noise_seed" || k == "rand_seed" || strings.HasSuffix(k, "_seed")
+}
+
+// normalizeInjectedSeeds rewrites negative seed inputs in an injected graph to a
+// concrete non-negative random seed BEFORE diffing. This covers the case where
+// both the injected and the template seed are -1 (the diff would otherwise emit
+// nothing and RunningHub would reject the published workflow's -1).
+func normalizeInjectedSeeds(graph map[string]interface{}) {
+	for _, raw := range graph {
+		node, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		inputs, ok := node["inputs"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for k, v := range inputs {
+			if !isSeedFieldName(k) {
+				continue
+			}
+			if s, ok := scalarToFieldValue(v); ok {
+				if n, err := strconv.ParseInt(s, 10, 64); err == nil && n < 0 {
+					inputs[k] = rand.Int63()
+				}
+			}
+		}
+	}
+}
+
 // normalizeRunningHubSeeds replaces negative seed values (ComfyUI's "-1 = random"
 // convention, which RunningHub's KSampler rejects with min=0) with a concrete
 // non-negative random seed, preserving the randomize-each-run intent.
 func normalizeRunningHubSeeds(list []RHNodeInfo) []RHNodeInfo {
 	for i := range list {
-		fn := strings.ToLower(strings.TrimSpace(list[i].FieldName))
-		if fn != "seed" && fn != "noise_seed" && fn != "rand_seed" && !strings.HasSuffix(fn, "_seed") {
+		if !isSeedFieldName(list[i].FieldName) {
 			continue
 		}
 		if v, err := strconv.ParseInt(strings.TrimSpace(list[i].FieldValue), 10, 64); err == nil && v < 0 {
@@ -530,6 +562,7 @@ func runRunningHubImageTask(templateFileName string, template, injected map[stri
 	if workflowID == "" {
 		return "", fmt.Errorf("workflow「%s」未在设置里映射 RunningHub workflowId", templateFileName)
 	}
+	normalizeInjectedSeeds(injected)
 	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
 
 	rhGateAcquire()
@@ -576,6 +609,7 @@ func runRunningHubVideoTask(templateFileName string, template, injected map[stri
 	if workflowID == "" {
 		return "", fmt.Errorf("workflow「%s」未在设置里映射 RunningHub workflowId", templateFileName)
 	}
+	normalizeInjectedSeeds(injected)
 	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
 
 	rhGateAcquire()
@@ -623,6 +657,7 @@ func runRunningHubAudioTask(templateFileName string, template, injected map[stri
 	if workflowID == "" {
 		return "", fmt.Errorf("workflow「%s」未在设置里映射 RunningHub workflowId", templateFileName)
 	}
+	normalizeInjectedSeeds(injected)
 	nodeInfoList := BuildRunningHubNodeInfoList(template, injected)
 
 	rhGateAcquire()
